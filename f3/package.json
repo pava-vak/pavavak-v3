@@ -1,0 +1,14 @@
+﻿{
+  "name": "pavavak-f3",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PaVa-Vak web frontend v3",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^7.1.7"
+  }
+}
