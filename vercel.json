@@ -1,0 +1,5 @@
+{
+  "buildCommand": "cd f3 && npm install && npm run build",
+  "outputDirectory": "f3/dist",
+  "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }]
+}
