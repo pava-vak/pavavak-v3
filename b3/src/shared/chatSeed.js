@@ -1,18 +1,42 @@
-﻿function createSeedState(user) {
+// Demo contact user IDs — high range to avoid collisions with real users
+const DEMO_CONTACT_A = 9001; // "Alex" demo contact
+const DEMO_CONTACT_B = 9002; // "Books" demo contact
+const DEMO_CHANNEL   = 9003; // system channel user
+
+function directId(a, b) {
+  const [lo, hi] = [Number(a), Number(b)].sort((x, y) => x - y);
+  return `direct::${lo}:${hi}`;
+}
+
+function createSeedState(user) {
+  const uid = user.userId;
   const now = Date.now();
+
+  const chatA  = directId(uid, DEMO_CONTACT_A);
+  const chatB  = directId(uid, DEMO_CONTACT_B);
+  const chatCh = 'channel::9003';
+
+  // Per-user message IDs so concurrent seeds don't conflict
+  const mA1 = `m-${uid}-a1`;
+  const mA2 = `m-${uid}-a2`;
+  const mA3 = `m-${uid}-a3`;
+  const mB1 = `m-${uid}-b1`;
+  const mB2 = `m-${uid}-b2`;
+  const mC1 = `m-${uid}-c1`;
 
   return {
     chats: [
       {
-        chatId: 'direct::101',
+        chatId: chatA,
         chatType: 'direct',
-        title: 'Nenu Natho',
-        subtitle: '@nenu',
-        avatarText: 'N',
+        contactUserId: DEMO_CONTACT_A,
+        title: 'Alex',
+        subtitle: '@alex',
+        avatarText: 'A',
         unreadCount: 2,
         muted: false,
         lastMessage: {
-          messageId: 'm-101-3',
+          messageId: mA3,
           text: 'And after that we can plug Android into the same endpoints.',
           sentAt: new Date(now - 1000 * 60 * 12).toISOString(),
           direction: 'incoming',
@@ -20,15 +44,16 @@
         }
       },
       {
-        chatId: 'direct::102',
+        chatId: chatB,
         chatType: 'direct',
+        contactUserId: DEMO_CONTACT_B,
         title: 'Books',
         subtitle: '@books',
         avatarText: 'B',
         unreadCount: 0,
         muted: false,
         lastMessage: {
-          messageId: 'm-102-2',
+          messageId: mB2,
           text: 'Yes. No full-history load and no hidden N+1 queries.',
           sentAt: new Date(now - 1000 * 60 * 25).toISOString(),
           direction: 'outgoing',
@@ -36,15 +61,16 @@
         }
       },
       {
-        chatId: 'channel::103',
+        chatId: chatCh,
         chatType: 'channel',
+        contactUserId: DEMO_CHANNEL,
         title: 'Announcements',
         subtitle: 'System channel',
         avatarText: 'A',
         unreadCount: 1,
         muted: false,
         lastMessage: {
-          messageId: 'm-103-1',
+          messageId: mC1,
           text: 'Welcome to V3. This thread is still demo data, but the shape is now clean.',
           sentAt: new Date(now - 1000 * 60 * 45).toISOString(),
           direction: 'incoming',
@@ -53,17 +79,17 @@
       }
     ],
     messagesByChatId: {
-      'direct::101': [
+      [chatA]: [
         {
-          messageId: 'm-101-1',
+          messageId: mA1,
           direction: 'incoming',
-          senderDisplayName: 'Nenu Natho',
+          senderDisplayName: 'Alex',
           text: 'We have the V3 auth loop working.',
           sentAt: new Date(now - 1000 * 60 * 16).toISOString(),
           status: 'delivered'
         },
         {
-          messageId: 'm-101-2',
+          messageId: mA2,
           direction: 'outgoing',
           senderDisplayName: user.displayName,
           text: 'Good. Next we keep the thread contract small and predictable.',
@@ -71,17 +97,17 @@
           status: 'read'
         },
         {
-          messageId: 'm-101-3',
+          messageId: mA3,
           direction: 'incoming',
-          senderDisplayName: 'Nenu Natho',
+          senderDisplayName: 'Alex',
           text: 'And after that we can plug Android into the same endpoints.',
           sentAt: new Date(now - 1000 * 60 * 12).toISOString(),
           status: 'delivered'
         }
       ],
-      'direct::102': [
+      [chatB]: [
         {
-          messageId: 'm-102-1',
+          messageId: mB1,
           direction: 'incoming',
           senderDisplayName: 'Books',
           text: 'Keep the chat list query lean from the start.',
@@ -89,7 +115,7 @@
           status: 'delivered'
         },
         {
-          messageId: 'm-102-2',
+          messageId: mB2,
           direction: 'outgoing',
           senderDisplayName: user.displayName,
           text: 'Yes. No full-history load and no hidden N+1 queries.',
@@ -97,9 +123,9 @@
           status: 'read'
         }
       ],
-      'channel::103': [
+      [chatCh]: [
         {
-          messageId: 'm-103-1',
+          messageId: mC1,
           direction: 'incoming',
           senderDisplayName: 'Announcements',
           text: 'Welcome to V3. This thread is still demo data, but the shape is now clean.',

@@ -23,9 +23,9 @@ async function signAccessToken(user) {
 
 async function signRefreshToken(user) {
   return new SignJWT({
-    sub: String(user.userId),
-    username: user.username,
-    tokenType: 'refresh'
+    ...baseClaims(user),
+    tokenType: 'refresh',
+    tv: Number(user.tokenVersion || 0)
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setIssuedAt()
@@ -40,12 +40,26 @@ async function verifyAccessToken(token) {
 
 async function verifyRefreshToken(token) {
   const result = await jwtVerify(token, refreshSecret);
+  if (result.payload.tokenType !== 'refresh') {
+    throw new Error('Invalid token type');
+  }
   return result.payload;
+}
+
+function userFromClaims(claims) {
+  return {
+    userId: Number(claims.sub),
+    username: claims.username,
+    displayName: claims.displayName || claims.username,
+    isAdmin: Boolean(claims.isAdmin),
+    tokenVersion: Number(claims.tv || 0)
+  };
 }
 
 module.exports = {
   signAccessToken,
   signRefreshToken,
   verifyAccessToken,
-  verifyRefreshToken
+  verifyRefreshToken,
+  userFromClaims
 };

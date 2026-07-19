@@ -12,6 +12,7 @@ Thumbs.db
 .idea/
 *.iml
 .gradle/
+.gradle-user-home/
 local.properties
 *.keystore
 *.jks

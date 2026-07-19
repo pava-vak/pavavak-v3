@@ -1,10 +1,9 @@
 ﻿const { env } = require('../../config/env');
-const demoStore = require('../../shared/demoChatStore');
-const dbRepo = require('../../db/chat.repository');
+const chatAdapter = require('../../db/chatAdapter');
+const realtime = require('../../realtime/eventEmitter');
+
 async function listChatsForUser(user) {
-  if (!env.DATABASE_URL) {
-    return demoStore.listChatsForUser(user);
-  }
-  return dbRepo.listChatsForUser(user);
+  return chatAdapter.listChatsForUser(user);
 }
+
 module.exports = { listChatsForUser };

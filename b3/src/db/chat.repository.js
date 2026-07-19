@@ -163,7 +163,7 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
   };
 }
 
-async function appendOutgoingMessage(user, chatId, text) {
+async function appendOutgoingMessage(user, chatId, text, messageId = null) {
   await ensureSeededForUser(user);
   const db = getPool();
   const exists = await db.query('select 1 from v3_user_chats where user_id = $1 and chat_id = $2', [user.userId, chatId]);
@@ -173,10 +173,10 @@ async function appendOutgoingMessage(user, chatId, text) {
     throw error;
   }
 
-  const messageId = `m-${crypto.randomUUID()}`;
+  const resolvedMessageId = messageId || `m-${crypto.randomUUID()}`;
   const sentAt = new Date().toISOString();
   const message = {
-    messageId,
+    messageId: resolvedMessageId,
     direction: 'outgoing',
     senderDisplayName: user.displayName,
     text,
@@ -193,7 +193,7 @@ async function appendOutgoingMessage(user, chatId, text) {
       ) values (
         $1, $2, $3, $4, $5, $6, $7::timestamptz, $8
       )`,
-      [user.userId, chatId, message.messageId, message.direction, message.senderDisplayName, message.text, message.sentAt, message.status]
+      [user.userId, chatId, resolvedMessageId, message.direction, message.senderDisplayName, message.text, message.sentAt, message.status]
     );
     await client.query(
       `update v3_user_chats
@@ -218,9 +218,208 @@ async function appendOutgoingMessage(user, chatId, text) {
   return message;
 }
 
+async function getChatSummary(user, chatId) {
+  const db = getPool();
+  const result = await db.query(
+    `select unread_count, last_message_id, last_message_text, last_message_sent_at, last_message_direction, last_message_status
+     from v3_user_chats
+     where user_id = $1 and chat_id = $2`,
+    [user.userId, chatId]
+  );
+  if (result.rowCount === 0) return null;
+  const row = result.rows[0];
+  return {
+    unreadCount: row.unread_count,
+    lastMessage: row.last_message_id
+      ? {
+          messageId: row.last_message_id,
+          text: row.last_message_text,
+          sentAt: row.last_message_sent_at?.toISOString?.() || row.last_message_sent_at,
+          direction: row.last_message_direction,
+          status: row.last_message_status
+        }
+      : null
+  };
+}
+
+async function findSenderUserId(db, chatId, messageId) {
+  const r = await db.query(
+    `select user_id from v3_user_messages
+     where chat_id = $1 and message_id = $2 and direction = 'outgoing'
+     limit 1`,
+    [chatId, messageId]
+  );
+  return r.rows[0] ? Number(r.rows[0].user_id) : null;
+}
+
+async function markDelivered(user, chatId, messageId) {
+  await ensureSeededForUser(user);
+  const db = getPool();
+  const result = await db.query(
+    `update v3_user_messages
+     set status = 'delivered'
+     where user_id = $1 and chat_id = $2 and message_id = $3 and direction = 'incoming' and status = 'sent'
+     returning message_id, status`,
+    [user.userId, chatId, messageId]
+  );
+  if (result.rowCount === 0) {
+    const existing = await db.query(
+      `select message_id, status from v3_user_messages
+       where user_id = $1 and chat_id = $2 and message_id = $3`,
+      [user.userId, chatId, messageId]
+    );
+    if (existing.rowCount === 0) return null;
+    return {
+      messageId: existing.rows[0].message_id,
+      status: existing.rows[0].status,
+      senderUserId: await findSenderUserId(db, chatId, messageId)
+    };
+  }
+  return {
+    messageId: result.rows[0].message_id,
+    status: result.rows[0].status,
+    senderUserId: await findSenderUserId(db, chatId, messageId)
+  };
+}
+
+async function markRead(user, chatId, messageId) {
+  await ensureSeededForUser(user);
+  const db = getPool();
+  const client = await db.connect();
+  try {
+    await client.query('begin');
+    const updated = await client.query(
+      `update v3_user_messages
+       set status = 'read'
+       where user_id = $1 and chat_id = $2 and message_id = $3 and status != 'read'
+       returning message_id, status`,
+      [user.userId, chatId, messageId]
+    );
+    if (updated.rowCount === 0) {
+      const existing = await client.query(
+        `select message_id, status from v3_user_messages
+         where user_id = $1 and chat_id = $2 and message_id = $3`,
+        [user.userId, chatId, messageId]
+      );
+      if (existing.rowCount === 0) {
+        await client.query('rollback');
+        return null;
+      }
+      const unread = await client.query(
+        `select count(*)::int as count from v3_user_messages
+         where user_id = $1 and chat_id = $2 and direction = 'incoming' and status != 'read'`,
+        [user.userId, chatId]
+      );
+      await client.query('rollback');
+      return {
+        messageId: existing.rows[0].message_id,
+        status: existing.rows[0].status,
+        unreadCount: unread.rows[0].count,
+        senderUserId: await findSenderUserId(client, chatId, messageId)
+      };
+    }
+
+    const unread = await client.query(
+      `select count(*)::int as count from v3_user_messages
+       where user_id = $1 and chat_id = $2 and direction = 'incoming' and status != 'read'`,
+      [user.userId, chatId]
+    );
+    const unreadCount = unread.rows[0].count;
+    await client.query(
+      `update v3_user_chats set unread_count = $3, updated_at = now()
+       where user_id = $1 and chat_id = $2`,
+      [user.userId, chatId, unreadCount]
+    );
+    const senderUserId = await findSenderUserId(client, chatId, messageId);
+    await client.query('commit');
+    return {
+      messageId: updated.rows[0].message_id,
+      status: updated.rows[0].status,
+      unreadCount,
+      senderUserId
+    };
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function markChatRead(user, chatId) {
+  await ensureSeededForUser(user);
+  const db = getPool();
+  const client = await db.connect();
+  try {
+    await client.query('begin');
+    const exists = await client.query(
+      'select 1 from v3_user_chats where user_id = $1 and chat_id = $2',
+      [user.userId, chatId]
+    );
+    if (exists.rowCount === 0) {
+      await client.query('rollback');
+      return null;
+    }
+
+    const updated = await client.query(
+      `update v3_user_messages
+       set status = 'read'
+       where user_id = $1 and chat_id = $2 and direction = 'incoming' and status != 'read'
+       returning message_id`,
+      [user.userId, chatId]
+    );
+
+    await client.query(
+      `update v3_user_chats set unread_count = 0, updated_at = now()
+       where user_id = $1 and chat_id = $2`,
+      [user.userId, chatId]
+    );
+    await client.query('commit');
+
+    const summary = await getChatSummary(user, chatId);
+    const db2 = getPool();
+    const receipts = await Promise.all(
+      updated.rows.map(async (row) => ({
+        messageId: row.message_id,
+        senderUserId: await findSenderUserId(db2, chatId, row.message_id)
+      }))
+    );
+    return {
+      updatedMessageIds: updated.rows.map((row) => row.message_id),
+      updatedReceipts: receipts,
+      lastMessage: summary?.lastMessage || null
+    };
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function userHasAccess(user, chatId) {
+  const db = getPool();
+  const result = await db.query(
+    'select 1 from v3_user_chats where user_id = $1 and chat_id = $2 limit 1',
+    [user.userId, chatId]
+  );
+  return result.rowCount > 0;
+}
+
+async function getConversationMemberUserIds(chatId) {
+  const db = getPool();
+  const result = await db.query('select distinct user_id from v3_user_chats where chat_id = $1', [chatId]);
+  return result.rows.map((row) => Number(row.user_id));
+}
+
 module.exports = {
   ensureSeededForUser,
   listChatsForUser,
   listMessagesForChat,
-  appendOutgoingMessage
+  appendOutgoingMessage,
+  markDelivered,
+  markRead,
+  markChatRead,
+  userHasAccess,
+  getConversationMemberUserIds
 };

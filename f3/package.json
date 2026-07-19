@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "pavavak-f3",
   "version": "0.1.0",
   "private": true,
@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:staging": "vite build --mode staging",
     "preview": "vite preview"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "vite": "^7.1.7"
