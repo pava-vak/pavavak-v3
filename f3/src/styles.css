@@ -1913,3 +1913,150 @@ input {
   font-size: 0.7rem; color: var(--v3-muted);
   margin-right: 0.3rem; opacity: 0.75;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PWA & Mobile Enhancements
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Dynamic viewport height — tracks mobile browser chrome correctly */
+html, body { height: 100%; overscroll-behavior: none; }
+#app { height: 100%; display: flex; flex-direction: column; }
+.app-shell { height: 100dvh; }
+
+/* ── Mobile bottom navigation (hidden on desktop) ──────────────────── */
+.mobile-bottom-nav { display: none; }
+
+@media (max-width: 768px) {
+
+  /* ── Prevent iOS double-tap zoom & text rescaling ─────────────────── */
+  * { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+
+  /* ── Prevent iOS input zoom (inputs < 16px auto-zoom the viewport) ── */
+  input:not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"]),
+  textarea, select {
+    font-size: max(16px, 1em) !important;
+  }
+
+  /* ── App shell: leave room for bottom nav + iOS home indicator ─────── */
+  .app-shell {
+    height: calc(100dvh - 56px - env(safe-area-inset-bottom));
+    margin-bottom: 0;
+  }
+
+  /* ── Chat sidebar: safe area sides ────────────────────────────────── */
+  .chat-sidebar {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* ── Thread composer: push above keyboard on iOS ──────────────────── */
+  .thread-panel {
+    display: flex;
+    flex-direction: column;
+  }
+  .thread-messages {
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* ── Mobile bottom navigation ─────────────────────────────────────── */
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: calc(56px + env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    background: var(--v3-surface-solid);
+    border-top: 1px solid var(--v3-border);
+    z-index: 40;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .mobile-nav-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    border: 0;
+    background: transparent;
+    color: var(--v3-muted);
+    cursor: pointer;
+    padding: 6px 4px 4px;
+    min-height: 44px;
+    position: relative;
+    transition: color 0.12s;
+  }
+
+  .mobile-nav-btn .nav-icon {
+    font-size: 19px;
+    line-height: 1;
+  }
+
+  .mobile-nav-btn .nav-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.025em;
+    line-height: 1;
+  }
+
+  .mobile-nav-btn.active {
+    color: var(--v3-accent);
+  }
+
+  .mobile-nav-btn.active::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 25%; right: 25%;
+    height: 2px;
+    background: var(--v3-accent);
+    border-radius: 0 0 3px 3px;
+  }
+
+  .nav-badge {
+    position: absolute;
+    top: 4px; right: calc(50% - 22px);
+    min-width: 16px; height: 16px;
+    background: var(--v3-danger);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 700;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+    line-height: 1;
+  }
+
+  /* ── Tab-based section visibility (only hides on mobile) ──────────── */
+  .app-shell[data-mobile-tab="chats"] .sidebar-section-people,
+  .app-shell[data-mobile-tab="chats"] .sidebar-section-admin { display: none; }
+
+  .app-shell[data-mobile-tab="people"] .sidebar-section-chats,
+  .app-shell[data-mobile-tab="people"] .sidebar-section-admin { display: none; }
+
+  .app-shell[data-mobile-tab="admin"] .sidebar-section-chats,
+  .app-shell[data-mobile-tab="admin"] .sidebar-section-people { display: none; }
+
+  /* When thread is open, hide the bottom nav */
+  .app-shell.thread-open ~ .mobile-bottom-nav { display: none; }
+
+  /* ── Larger tap targets for chat/message actions ───────────────────── */
+  .sidebar-icon-btn { width: 40px; height: 40px; }
+  .thread-back { min-width: 44px; min-height: 44px; font-size: 1.2rem; }
+  .send-button { min-width: 44px; min-height: 44px; }
+
+  /* ── Auth card on mobile ───────────────────────────────────────────── */
+  .auth-shell { padding: 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+
+  /* ── Admin panel on mobile ─────────────────────────────────────────── */
+  .ap-login-card { margin: 0; padding: 24px 20px; }
+  .ap-header { padding: 0 12px; }
+  .ap-main { padding: 12px; }
+  .ap-change-pw-modal { padding: 20px 16px; }
+}

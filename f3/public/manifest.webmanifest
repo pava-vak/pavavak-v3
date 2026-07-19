@@ -1,11 +1,12 @@
 {
-  "name": "PaVa Messenger",
+  "id": "/",
+  "name": "PaVa Vak",
   "short_name": "PaVa",
   "description": "Lightning-fast organisation messenger.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait-primary",
+  "display_override": ["window-controls-overlay", "standalone"],
   "background_color": "#1a2e20",
   "theme_color": "#2f6f4f",
   "categories": ["productivity", "social"],
@@ -31,5 +32,6 @@
       "url": "/",
       "icons": [{ "src": "/icon.svg", "sizes": "any" }]
     }
-  ]
+  ],
+  "prefer_related_applications": false
 }

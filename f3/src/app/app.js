@@ -15,11 +15,42 @@ import { config } from '../shared/config.js';
 import { getActiveTheme, setTheme } from '../shared/themeStore.js';
 import { initPush, unsubscribePush } from '../shared/pushClient.js';
 
-function renderAuthenticatedView(user, chatState, peopleState, adminState, activeChat, threadState, composerValue = '', isMonitoring = false, viewOnce = false, deleteAfter = 'never') {
+function renderMobileBottomNav(user, mobileTab, totalUnread, canInstall) {
+  return `
+    <nav class="mobile-bottom-nav" role="navigation" aria-label="Main navigation">
+      <button class="mobile-nav-btn ${mobileTab === 'chats' ? 'active' : ''}" data-role="mobile-tab" data-tab="chats" aria-label="Chats">
+        <span class="nav-icon">💬</span>
+        ${totalUnread > 0 && mobileTab !== 'chats' ? `<span class="nav-badge">${totalUnread > 99 ? '99+' : totalUnread}</span>` : ''}
+        <span class="nav-label">Chats</span>
+      </button>
+      <button class="mobile-nav-btn ${mobileTab === 'people' ? 'active' : ''}" data-role="mobile-tab" data-tab="people" aria-label="People">
+        <span class="nav-icon">👥</span>
+        <span class="nav-label">People</span>
+      </button>
+      <button class="mobile-nav-btn ${mobileTab === 'settings' ? 'active' : ''}" data-role="mobile-tab" data-tab="settings" aria-label="Settings">
+        <span class="nav-icon">⚙</span>
+        <span class="nav-label">Settings</span>
+      </button>
+      ${user.isAdmin ? `
+      <button class="mobile-nav-btn ${mobileTab === 'admin' ? 'active' : ''}" data-role="mobile-tab" data-tab="admin" aria-label="Admin">
+        <span class="nav-icon">🔐</span>
+        <span class="nav-label">Admin</span>
+      </button>` : ''}
+      ${canInstall ? `
+      <button class="mobile-nav-btn" data-role="pwa-install" aria-label="Install app">
+        <span class="nav-icon">⬇</span>
+        <span class="nav-label">Install</span>
+      </button>` : ''}
+    </nav>
+  `;
+}
+
+function renderAuthenticatedView(user, chatState, peopleState, adminState, activeChat, threadState, composerValue = '', isMonitoring = false, viewOnce = false, deleteAfter = 'never', mobileTab = 'chats', canInstall = false) {
   const socketStatus = getSocketStatus();
   const avatarLetter = escapeHtml((user.displayName || user.username || '?').slice(0, 1).toUpperCase());
+  const totalUnread = chatState.items.reduce((n, c) => n + (c.unreadCount || 0), 0);
   return `
-    <div class="app-shell ${activeChat ? 'thread-open' : ''}">
+    <div class="app-shell ${activeChat ? 'thread-open' : ''}" data-mobile-tab="${mobileTab}">
       <aside class="chat-sidebar">
         <div class="sidebar-topbar">
           <div class="sidebar-topbar-avatar">${avatarLetter}</div>
@@ -34,15 +65,20 @@ function renderAuthenticatedView(user, chatState, peopleState, adminState, activ
           </div>
         </div>
         <div class="sidebar-body">
-          ${renderChatListView(chatState, activeChat?.chatId)}
-          ${renderPeopleView(peopleState)}
-          ${user.isAdmin ? renderAdminView(adminState) : ''}
+          <div class="sidebar-section-chats">
+            ${renderChatListView(chatState, activeChat?.chatId)}
+          </div>
+          <div class="sidebar-section-people">
+            ${renderPeopleView(peopleState)}
+          </div>
+          ${user.isAdmin ? `<div class="sidebar-section-admin">${renderAdminView(adminState)}</div>` : ''}
         </div>
       </aside>
       <main class="thread-area">
         ${renderChatThreadView({ activeChat, threadState, composerValue, readOnly: isMonitoring, viewOnce, deleteAfter })}
       </main>
     </div>
+    ${renderMobileBottomNav(user, activeChat ? '' : mobileTab, totalUnread, canInstall)}
   `;
 }
 
@@ -71,6 +107,18 @@ export function renderAppShell(root) {
   let activeChat = null;
   let isMonitoring = false;
   let settingsOpen = false;
+  let mobileTab = 'chats';
+  let installPrompt = null;
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    installPrompt = e;
+    render();
+  });
+  window.addEventListener('appinstalled', () => {
+    installPrompt = null;
+    render();
+  });
 
   function captureComposerState() {
     const input = root.querySelector('[data-role="composer-input"]');
@@ -182,7 +230,9 @@ export function renderAppShell(root) {
         composerSnapshot.value,
         isMonitoring,
         viewOnce,
-        deleteAfter
+        deleteAfter,
+        mobileTab,
+        !!installPrompt
       ) + (settingsOpen ? renderSettingsModal() : '');
       root.querySelector('[data-role="sign-out"]')?.addEventListener('click', () => {
         sessionStore.signOut();
@@ -208,6 +258,7 @@ export function renderAppShell(root) {
         onBack: () => {
           activeChat = null;
           isMonitoring = false;
+          mobileTab = 'chats';
           render();
         },
         onOpenViewOnce: (messageId) => chatThreadStore.openViewOnce(messageId),
@@ -225,6 +276,30 @@ export function renderAppShell(root) {
         onResetPassword: (userId) => adminStore.resetPassword(userId),
         onClearOtp: () => adminStore.clearOtp()
       });
+      // Mobile bottom nav
+      root.querySelectorAll('[data-role="mobile-tab"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const tab = btn.dataset.tab;
+          if (tab === 'settings') {
+            settingsOpen = true;
+            render();
+            return;
+          }
+          mobileTab = tab;
+          render();
+          if (tab === 'people') {
+            root.querySelector('.people-search input')?.focus();
+          }
+        });
+      });
+      root.querySelector('[data-role="pwa-install"]')?.addEventListener('click', async () => {
+        if (!installPrompt) return;
+        installPrompt.prompt();
+        const { outcome } = await installPrompt.userChoice;
+        if (outcome === 'accepted') installPrompt = null;
+        render();
+      });
+
       restoreComposerState(composerSnapshot);
       scrollThreadToBottom();
       return;
