@@ -1,0 +1,15 @@
+package com.pavavak.v3.model
+
+data class ChatMessageSummary(val messageId: String, val text: String, val sentAt: String, val direction: String, val status: String)
+data class ChatListItem(val chatId: String, val chatType: String, val title: String, val subtitle: String, val avatarText: String, val unreadCount: Int, val muted: Boolean, val lastMessage: ChatMessageSummary?)
+data class ChatListResponse(val success: Boolean, val items: List<ChatListItem>)
+data class ThreadMessage(val messageId: String, val direction: String, val senderDisplayName: String, val text: String, val sentAt: String, val status: String)
+data class ThreadPage(val nextCursor: String?, val hasMore: Boolean)
+data class ThreadResponse(val success: Boolean, val chatId: String, val items: List<ThreadMessage>, val page: ThreadPage)
+data class SendMessageRequest(val chatId: String, val text: String)
+data class SendMessageResponse(val success: Boolean, val message: ThreadMessage)
+data class DirectChatRequest(val userId: Int)
+data class DirectChatResponse(val success: Boolean, val chat: ChatListItem)
+data class ReceiptRequest(val chatId: String)
+data class ReceiptResponse(val success: Boolean, val messageId: String, val status: String, val unreadCount: Int? = null)
+data class ReadChatResponse(val success: Boolean, val chatId: String, val unreadCount: Int, val updatedMessageIds: List<String>)

@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.PaVaV3" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/v3_blue</item>
+        <item name="android:statusBarColor">@color/v3_background</item>
+        <item name="android:navigationBarColor">@color/v3_background</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
+    </style>
+</resources>

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PaVa-V3">
+  <defs>
+    <linearGradient id="bgm" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#357d59"/>
+      <stop offset="0.6" stop-color="#245c40"/>
+      <stop offset="1" stop-color="#143425"/>
+    </linearGradient>
+  </defs>
+  <!-- full-bleed background so any mask shape stays on-brand -->
+  <rect width="512" height="512" fill="url(#bgm)"/>
+  <!-- mark kept within the central 80% safe zone for maskable cropping -->
+  <g transform="translate(106 118) scale(0.59)">
+    <path d="M150 150h170a72 72 0 0 1 72 72v36a72 72 0 0 1-72 72H236l-66 52v-52h-20a36 36 0 0 1-36-36V186a36 36 0 0 1 36-36z"
+          fill="#f3f7f4"/>
+    <circle cx="206" cy="240" r="16" fill="#245c40"/>
+    <circle cx="256" cy="240" r="16" fill="#245c40"/>
+    <circle cx="306" cy="240" r="16" fill="#245c40"/>
+  </g>
+</svg>

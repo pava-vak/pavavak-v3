@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="v3_background">#F4EFE4</color>
+    <color name="v3_surface">#FFFFFF</color>
+    <color name="v3_text">#102A43</color>
+    <color name="v3_muted">#5A6C7D</color>
+    <color name="v3_accent">#2F6F4F</color>
+    <color name="v3_blue">#1877F2</color>
+    <color name="v3_blue_light">#DDEAFD</color>
+</resources>
