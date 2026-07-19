@@ -8,7 +8,10 @@ const envSchema = z
     WEB_ORIGIN: z.string().url().default('http://localhost:3202'),
     WEB_ORIGINS: z.string().optional(),
     DATABASE_URL: z.string().min(1).optional(),
-    DATABASE_SSL_REJECT_UNAUTHORIZED: z.coerce.boolean().optional(),
+    DATABASE_SSL_REJECT_UNAUTHORIZED: z.preprocess(
+      (v) => v === true || v === 'true' || v === '1',
+      z.boolean()
+    ).optional(),
     ALLOW_DEV_LOGIN: z.preprocess(
       (v) => v === true || v === 'true' || v === '1',
       z.boolean()
