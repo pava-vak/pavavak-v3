@@ -11,11 +11,6 @@ const {
   verifyRefreshToken
 } = require('../../shared/security/token.service');
 
-const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1),
-  newPassword: passwordSchema
-});
-
 const devLoginSchema = z.object({
   userId: z.coerce.number().int().positive(),
   username: z.string().min(1),
@@ -25,6 +20,11 @@ const devLoginSchema = z.object({
 
 const usernameSchema = z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9_.-]+$/);
 const passwordSchema = z.string().min(8).max(128);
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: passwordSchema
+});
 
 const registerSchema = z.object({
   username: usernameSchema,
