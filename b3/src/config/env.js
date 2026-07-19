@@ -9,7 +9,10 @@ const envSchema = z
     WEB_ORIGINS: z.string().optional(),
     DATABASE_URL: z.string().min(1).optional(),
     DATABASE_SSL_REJECT_UNAUTHORIZED: z.coerce.boolean().optional(),
-    ALLOW_DEV_LOGIN: z.coerce.boolean().default(false),
+    ALLOW_DEV_LOGIN: z.preprocess(
+      (v) => v === true || v === 'true' || v === '1',
+      z.boolean()
+    ).default(false),
     JWT_ACCESS_SECRET: z.string().min(16).optional(),
     JWT_REFRESH_SECRET: z.string().min(16).optional(),
     JWT_ACCESS_TTL: z.string().min(2).default('15m'),
