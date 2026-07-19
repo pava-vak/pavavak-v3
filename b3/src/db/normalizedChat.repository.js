@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { getPool } = require('./pool');
 const { createSeedState } = require('../shared/chatSeed');
 const identity = require('./identityAdapter');
+const { env } = require('../config/env');
 
 async function ensureUser(user) {
   const db = getPool();
@@ -18,6 +19,8 @@ async function ensureUser(user) {
 
 async function ensureSeededForUser(user) {
   await ensureUser(user);
+  // No demo seed in production — real users should not get bot contacts
+  if (env.APP_ENV === 'production') return;
   const db = getPool();
   const existing = await db.query(
     'select 1 from v3_user_chat_summaries where user_id = $1 limit 1',
@@ -36,7 +39,7 @@ async function ensureSeededForUser(user) {
         await client.query(
           `insert into v3_users (user_id, username, display_name, is_admin)
            values ($1, $2, $3, false)
-           on conflict (user_id) do nothing`,
+           on conflict do nothing`,
           [contactUserId, chat.subtitle.replace(/^@/, '') || chat.title, chat.title]
         );
       }

@@ -30,6 +30,10 @@ function registerUserRoutes(app) {
       });
     }
 
+    if (parsed.data.q.length < 3) {
+      return { success: true, items: [] };
+    }
+
     const items = await identity.listUsers({
       query: parsed.data.q,
       excludeUserId: request.auth.userId,
