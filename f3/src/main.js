@@ -1,12 +1,16 @@
 import './styles.css';
-import { renderAppShell } from './app/app.js';
 import { initTheme } from './shared/themeStore.js';
 import { setServiceWorkerRegistration } from './shared/pushClient.js';
 
 initTheme();
 
 const app = document.querySelector('#app');
-renderAppShell(app);
+
+if (window.location.pathname.startsWith('/admin')) {
+  import('./admin/adminPanel.js').then(({ renderAdminPanel }) => renderAdminPanel(app));
+} else {
+  import('./app/app.js').then(({ renderAppShell }) => renderAppShell(app));
+}
 
 // Register service worker after first paint
 if ('serviceWorker' in navigator) {
