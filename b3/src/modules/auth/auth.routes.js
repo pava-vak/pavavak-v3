@@ -11,6 +11,11 @@ const {
   verifyRefreshToken
 } = require('../../shared/security/token.service');
 
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: passwordSchema
+});
+
 const devLoginSchema = z.object({
   userId: z.coerce.number().int().positive(),
   username: z.string().min(1),
@@ -213,6 +218,26 @@ function registerAuthRoutes(app) {
     success: true,
     user: request.auth
   }));
+
+  app.put('/api/v3/auth/change-password', { preHandler: requireAuth }, async (request, reply) => {
+    const parsed = changePasswordSchema.safeParse(request.body || {});
+    if (!parsed.success) {
+      return reply.status(400).send({
+        success: false,
+        error: 'Invalid request body',
+        details: parsed.error.flatten()
+      });
+    }
+
+    const user = await identity.getByIdWithHash(request.auth.userId);
+    if (!user || !(await verifyPassword(parsed.data.currentPassword, user.passwordHash))) {
+      return reply.status(401).send({ success: false, error: 'Current password is incorrect' });
+    }
+
+    const passwordHash = await hashPassword(parsed.data.newPassword);
+    await identity.setPasswordHash(request.auth.userId, passwordHash);
+    return { success: true };
+  });
 }
 
 module.exports = { registerAuthRoutes };

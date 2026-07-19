@@ -107,6 +107,9 @@ function renderUsersTab(state) {
           <button class="ap-otp-dismiss" data-role="clear-otp">Dismiss</button>
         </div>
       ` : ''}
+      <div class="ap-toolbar">
+        <button class="ap-danger-btn" data-role="clean-seed-data">🗑 Remove Demo Bots</button>
+      </div>
       ${state.usersLoading ? '<p class="ap-loading">Loading users…</p>' : ''}
       ${!state.usersLoading && realUsers.length === 0 ? '<p class="ap-empty">No users registered yet.</p>' : ''}
       ${realUsers.length > 0 ? `
@@ -117,26 +120,34 @@ function renderUsersTab(state) {
                 <th>#</th>
                 <th>Display Name</th>
                 <th>Username</th>
-                <th>Role</th>
+                <th>Status</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               ${realUsers.map((u) => `
-                <tr>
+                <tr class="${u.disabled ? 'ap-row-disabled' : ''}">
                   <td class="ap-td-id">${escapeHtml(String(u.userId))}</td>
                   <td>${escapeHtml(u.displayName || '—')}</td>
                   <td class="ap-td-username">@${escapeHtml(u.username)}</td>
                   <td>
-                    <span class="ap-role-badge ${u.isAdmin ? 'ap-role-admin' : 'ap-role-user'}">
-                      ${u.isAdmin ? 'Admin' : 'User'}
+                    <span class="ap-role-badge ${u.isAdmin ? 'ap-role-admin' : (u.disabled ? 'ap-role-disabled' : 'ap-role-user')}">
+                      ${u.isAdmin ? 'Admin' : (u.disabled ? 'Disabled' : 'Active')}
                     </span>
                   </td>
-                  <td>
+                  <td class="ap-td-actions">
                     <button class="ap-action-btn" data-role="reset-password"
                       data-user-id="${escapeHtml(String(u.userId))}">
                       Reset PW
                     </button>
+                    ${!u.isAdmin ? `
+                      <button class="ap-action-btn ${u.disabled ? 'ap-action-enable' : 'ap-action-disable'}"
+                        data-role="toggle-disabled"
+                        data-user-id="${escapeHtml(String(u.userId))}"
+                        data-disabled="${u.disabled ? 'true' : 'false'}">
+                        ${u.disabled ? 'Enable' : 'Disable'}
+                      </button>
+                    ` : ''}
                   </td>
                 </tr>
               `).join('')}
@@ -281,6 +292,17 @@ export function renderAdminPanel(root) {
     });
     root.querySelectorAll('[data-role="reset-password"]').forEach((btn) => {
       btn.addEventListener('click', () => store.resetPassword(Number(btn.dataset.userId)));
+    });
+    root.querySelectorAll('[data-role="toggle-disabled"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const isCurrentlyDisabled = btn.dataset.disabled === 'true';
+        store.toggleDisabled(Number(btn.dataset.userId), !isCurrentlyDisabled);
+      });
+    });
+    root.querySelector('[data-role="clean-seed-data"]')?.addEventListener('click', () => {
+      if (confirm('Remove all demo bot users (Alex, Books, etc.)? This cannot be undone.')) {
+        store.cleanSeedData();
+      }
     });
     root.querySelector('[data-role="clear-otp"]')?.addEventListener('click', () => store.clearOtp());
     root.querySelectorAll('[data-role="monitor-open"]').forEach((btn) => {

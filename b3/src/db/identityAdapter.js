@@ -64,14 +64,46 @@ async function setPasswordHash(userId, passwordHash) {
   return store().setPasswordHash(userId, passwordHash);
 }
 
+async function setDisabled(userId, disabled) {
+  if (!store().setDisabled) {
+    const err = new Error('Not supported in this storage mode');
+    err.status = 501;
+    throw err;
+  }
+  return store().setDisabled(userId, disabled);
+}
+
+async function getByIdWithHash(userId) {
+  if (!store().getByIdWithHash) return null;
+  return store().getByIdWithHash(userId);
+}
+
+async function adminListUsers(input) {
+  if (!store().adminListUsers) {
+    const users = await store().listUsers(input);
+    return users.map((u) => ({ ...publicUser(u), disabled: Boolean(u.disabled) }));
+  }
+  const users = await store().adminListUsers(input);
+  return users.map((u) => ({ ...publicUser(u), disabled: Boolean(u.disabled) }));
+}
+
+async function cleanSeedData() {
+  if (!store().cleanSeedData) return;
+  return store().cleanSeedData();
+}
+
 module.exports = {
   findByUsername,
   getById,
+  getByIdWithHash,
   createUser,
   setPasswordHash,
+  setDisabled,
   listUsers,
+  adminListUsers,
   adminSummary,
   ensureUser,
   incrementTokenVersion,
+  cleanSeedData,
   publicUser
 };

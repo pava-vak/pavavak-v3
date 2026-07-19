@@ -79,11 +79,55 @@ async function listUsers({ query = '', excludeUserId = null, limit = 25 } = {}) 
      from v3_users
      where ($1 = '' or username ilike '%' || $1 || '%' or display_name ilike '%' || $1 || '%')
        and ($2::bigint is null or user_id != $2::bigint)
+       and not disabled
+       and user_id < 9000
      order by display_name asc, username asc
      limit $3`,
     [query, excludeUserId, limit]
   );
   return result.rows.map(mapUser);
+}
+
+async function adminListUsers({ query = '', limit = 100 } = {}) {
+  const db = getPool();
+  const result = await db.query(
+    `select user_id, username, display_name, is_admin, disabled, token_version
+     from v3_users
+     where ($1 = '' or username ilike '%' || $1 || '%' or display_name ilike '%' || $1 || '%')
+       and user_id < 9000
+     order by user_id asc
+     limit $2`,
+    [query, limit]
+  );
+  return result.rows.map(mapUser);
+}
+
+async function setDisabled(userId, disabled) {
+  const db = getPool();
+  const result = await db.query(
+    `update v3_users
+     set disabled = $2, token_version = token_version + 1
+     where user_id = $1 and user_id < 9000
+     returning user_id, username, display_name, is_admin, disabled, token_version`,
+    [userId, Boolean(disabled)]
+  );
+  return result.rowCount > 0 ? mapUser(result.rows[0]) : null;
+}
+
+async function getByIdWithHash(userId) {
+  const db = getPool();
+  const result = await db.query(
+    `select user_id, username, display_name, is_admin, disabled, token_version, password_hash
+     from v3_users where user_id = $1 limit 1`,
+    [userId]
+  );
+  if (result.rowCount === 0) return null;
+  return { ...mapUser(result.rows[0]), passwordHash: result.rows[0].password_hash };
+}
+
+async function cleanSeedData() {
+  const db = getPool();
+  await db.query('delete from v3_users where user_id >= 9000');
 }
 
 async function adminSummary() {
@@ -115,9 +159,13 @@ async function incrementTokenVersion(userId) {
 module.exports = {
   findByUsername,
   getById,
+  getByIdWithHash,
   createUser,
   setPasswordHash,
+  setDisabled,
   listUsers,
+  adminListUsers,
   adminSummary,
-  incrementTokenVersion
+  incrementTokenVersion,
+  cleanSeedData
 };

@@ -9,12 +9,13 @@ import { createPeopleStore } from '../features/people/peopleStore.js';
 import { bindPeopleView, renderPeopleView } from '../features/people/peopleView.js';
 import { createAdminStore } from '../features/admin/adminStore.js';
 import { bindAdminView, renderAdminView } from '../features/admin/adminView.js';
+import { renderSettingsModal, bindSettingsModal } from '../features/settings/settingsView.js';
 import { subscribeSocket, getSocketStatus } from '../shared/socketClient.js';
 import { config } from '../shared/config.js';
 import { getActiveTheme, setTheme } from '../shared/themeStore.js';
 import { initPush, unsubscribePush } from '../shared/pushClient.js';
 
-function renderAuthenticatedView(user, chatState, peopleState, adminState, activeChat, threadState, composerValue = '', isMonitoring = false) {
+function renderAuthenticatedView(user, chatState, peopleState, adminState, activeChat, threadState, composerValue = '', isMonitoring = false, viewOnce = false, deleteAfter = 'never') {
   const socketStatus = getSocketStatus();
   const avatarLetter = escapeHtml((user.displayName || user.username || '?').slice(0, 1).toUpperCase());
   return `
@@ -28,6 +29,7 @@ function renderAuthenticatedView(user, chatState, peopleState, adminState, activ
           </div>
           <div class="sidebar-topbar-actions">
             <span class="sidebar-conn-dot ${socketStatus}" title="${socketStatus}"></span>
+            <button class="sidebar-icon-btn" data-role="open-settings" title="Settings" aria-label="Settings">⚙</button>
             <button class="sidebar-icon-btn" data-role="sign-out" title="Sign out" aria-label="Sign out">✕</button>
           </div>
         </div>
@@ -38,7 +40,7 @@ function renderAuthenticatedView(user, chatState, peopleState, adminState, activ
         </div>
       </aside>
       <main class="thread-area">
-        ${renderChatThreadView({ activeChat, threadState, composerValue, readOnly: isMonitoring })}
+        ${renderChatThreadView({ activeChat, threadState, composerValue, readOnly: isMonitoring, viewOnce, deleteAfter })}
       </main>
     </div>
   `;
@@ -68,6 +70,7 @@ export function renderAppShell(root) {
   let adminState = adminStore.getState();
   let activeChat = null;
   let isMonitoring = false;
+  let settingsOpen = false;
 
   function captureComposerState() {
     const input = root.querySelector('[data-role="composer-input"]');
@@ -168,6 +171,7 @@ export function renderAppShell(root) {
     }
 
     if (sessionState.status === 'authenticated' && sessionState.user) {
+      const { viewOnce, deleteAfter } = chatThreadStore.getState();
       root.innerHTML = renderAuthenticatedView(
         sessionState.user,
         chatState,
@@ -176,11 +180,22 @@ export function renderAppShell(root) {
         activeChat,
         threadState,
         composerSnapshot.value,
-        isMonitoring
-      );
+        isMonitoring,
+        viewOnce,
+        deleteAfter
+      ) + (settingsOpen ? renderSettingsModal() : '');
       root.querySelector('[data-role="sign-out"]')?.addEventListener('click', () => {
         sessionStore.signOut();
       });
+      root.querySelector('[data-role="open-settings"]')?.addEventListener('click', () => {
+        settingsOpen = true;
+        render();
+      });
+      if (settingsOpen) {
+        bindSettingsModal(root, {
+          onClose: () => { settingsOpen = false; render(); }
+        });
+      }
       bindChatListView(root, {
         onOpenChat: openChat,
         onRetry: () => chatListStore.load()
@@ -194,7 +209,10 @@ export function renderAppShell(root) {
           activeChat = null;
           isMonitoring = false;
           render();
-        }
+        },
+        onOpenViewOnce: (messageId) => chatThreadStore.openViewOnce(messageId),
+        onToggleViewOnce: () => chatThreadStore.setViewOnce(!chatThreadStore.getState().viewOnce),
+        onSetDeleteAfter: (value) => chatThreadStore.setDeleteAfter(value)
       });
       bindPeopleView(root, {
         onSearch: (query) => peopleStore.search(query),

@@ -137,6 +137,17 @@ export async function sendMessage(input) {
   });
 }
 
+export async function openViewOnceMessage(messageId) {
+  return request(`/api/v3/messages/${encodeURIComponent(messageId)}/view-once-open`, { method: 'POST' });
+}
+
+export async function changePassword(input) {
+  return request('/api/v3/auth/change-password', {
+    method: 'PUT',
+    body: JSON.stringify(input)
+  });
+}
+
 export async function searchUsers(query = '') {
   const params = new URLSearchParams();
   if (query) params.set('q', query);
@@ -175,6 +186,17 @@ export async function requestAdminUsers(query = '') {
   if (query) params.set('q', query);
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return request(`/api/v3/admin/users${suffix}`);
+}
+
+export async function requestAdminToggleDisabled(userId, disabled) {
+  return request(`/api/v3/admin/users/${userId}/disable`, {
+    method: 'PUT',
+    body: JSON.stringify({ disabled })
+  });
+}
+
+export async function requestAdminCleanSeedData() {
+  return request('/api/v3/admin/seed-data', { method: 'DELETE' });
 }
 
 export async function markChatRead(chatId) {

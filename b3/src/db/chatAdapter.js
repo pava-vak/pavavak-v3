@@ -46,21 +46,29 @@ async function listMessagesForChat(params) {
   return demoStore.listMessagesForChat(params.user, params.chatId, params.cursor, params.limit);
 }
 
-async function appendOutgoingMessage(user, chatId, text) {
+async function appendOutgoingMessage(user, chatId, text, _unused = null, flags = {}) {
   assertStorageConfigured();
   const messageId = `m-${crypto.randomUUID()}`;
 
   if (env.CHAT_STORAGE_MODE === 'dual-write' && env.DATABASE_URL) {
     const legacyMessage = await dbRepo.appendOutgoingMessage(user, chatId, text, messageId);
-    const normalizedMessage = await normalizedRepo.appendOutgoingMessage(user, chatId, text, messageId);
+    const normalizedMessage = await normalizedRepo.appendOutgoingMessage(user, chatId, text, messageId, flags);
     return normalizedMessage || legacyMessage;
   }
 
   const store = getStore();
   if (useNormalized() || useLegacyDb()) {
-    return store.appendOutgoingMessage(user, chatId, text, messageId);
+    return store.appendOutgoingMessage(user, chatId, text, messageId, flags);
   }
   return demoStore.appendOutgoingMessage(user, chatId, text, messageId);
+}
+
+async function openViewOnceMessage(user, messageId) {
+  assertStorageConfigured();
+  const store = getStore();
+  if (store.openViewOnceMessage) {
+    return store.openViewOnceMessage(user, messageId);
+  }
 }
 
 async function markDelivered(user, chatId, messageId) {
@@ -156,6 +164,7 @@ module.exports = {
   listChatsForUser,
   listMessagesForChat,
   appendOutgoingMessage,
+  openViewOnceMessage,
   markDelivered,
   markRead,
   markChatRead,

@@ -1,4 +1,4 @@
-import { markChatRead, markDelivered, requestAdminThread, requestThread, sendMessage } from '../../shared/apiClient.js';
+import { markChatRead, markDelivered, openViewOnceMessage, requestAdminThread, requestThread, sendMessage } from '../../shared/apiClient.js';
 import { emitTypingStart, emitTypingStop, joinChat } from '../../shared/socketClient.js';
 
 export function createChatThreadStore() {
@@ -12,7 +12,9 @@ export function createChatThreadStore() {
     sendStatus: 'idle',
     sendError: '',
     typingUsers: [],
-    loadMoreStatus: 'idle'
+    loadMoreStatus: 'idle',
+    viewOnce: false,
+    deleteAfter: 'never'
   };
 
   let openGeneration = 0;
@@ -204,12 +206,17 @@ export function createChatThreadStore() {
       sendError: ''
     });
 
+    const { viewOnce, deleteAfter } = state;
+
     try {
       const result = await sendMessage({
         chatId: state.chatId,
-        text: trimmedText
+        text: trimmedText,
+        viewOnce,
+        deleteAfter
       });
       replaceOptimisticMessage(result.message, tempId);
+      setState({ viewOnce: false, deleteAfter: 'never' });
       return result.message;
     } catch (error) {
       setState({
@@ -273,6 +280,23 @@ export function createChatThreadStore() {
     }
   }
 
+  async function openViewOnce(messageId) {
+    setState({
+      items: state.items.map((item) =>
+        item.messageId === messageId ? { ...item, viewOnceOpened: true } : item
+      )
+    });
+    openViewOnceMessage(messageId).catch(() => {});
+  }
+
+  function setViewOnce(value) {
+    setState({ viewOnce: Boolean(value) });
+  }
+
+  function setDeleteAfter(value) {
+    setState({ deleteAfter: value });
+  }
+
   function reset() {
     openGeneration += 1;
     if (typingTimer) {
@@ -289,7 +313,9 @@ export function createChatThreadStore() {
       sendStatus: 'idle',
       sendError: '',
       typingUsers: [],
-      loadMoreStatus: 'idle'
+      loadMoreStatus: 'idle',
+      viewOnce: false,
+      deleteAfter: 'never'
     });
   }
 
@@ -303,6 +329,9 @@ export function createChatThreadStore() {
     openAdminChat,
     loadMore,
     submitMessage,
+    openViewOnce,
+    setViewOnce,
+    setDeleteAfter,
     notifyTyping,
     handleSocketEvent,
     reset,

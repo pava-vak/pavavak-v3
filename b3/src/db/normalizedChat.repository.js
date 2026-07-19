@@ -242,7 +242,14 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
               then ${dnParam}
               else coalesce(sender.display_name, sender.username, msg.sender_id::text)
          end as sender_display_name,
-         msg.body as text,
+         msg.view_once,
+         msg.expires_at,
+         r.view_once_opened_at,
+         case
+           when msg.view_once and msg.sender_id = $1 then ''
+           when msg.view_once and msg.sender_id != $1 and r.view_once_opened_at is not null then ''
+           else msg.body
+         end as text,
          msg.created_at as sent_at,
          case
            when msg.sender_id = $1 then
@@ -276,7 +283,9 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
        from v3_messages msg
        join v3_message_receipts r on r.message_id = msg.message_id and r.user_id = $1
        left join v3_users sender on sender.user_id = msg.sender_id
-       where msg.conversation_id = $2 ${cursorClause}
+       where msg.conversation_id = $2
+         and (msg.expires_at is null or msg.expires_at > now())
+         ${cursorClause}
        order by msg.created_at desc, msg.message_id desc
        limit $3
      ) recent
@@ -293,7 +302,10 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
     senderDisplayName: row.sender_display_name,
     text: row.text,
     sentAt: row.sent_at?.toISOString?.() || row.sent_at,
-    status: row.status
+    status: row.status,
+    viewOnce: Boolean(row.view_once),
+    viewOnceOpened: Boolean(row.view_once_opened_at),
+    expiresAt: row.expires_at?.toISOString?.() || row.expires_at || null
   }));
 
   return {
@@ -303,7 +315,7 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
   };
 }
 
-async function appendOutgoingMessage(user, chatId, text, messageId = null) {
+async function appendOutgoingMessage(user, chatId, text, messageId = null, { viewOnce = false, expiresAt = null } = {}) {
   await ensureSeededForUser(user);
   const db = getPool();
   const exists = await db.query(
@@ -322,9 +334,12 @@ async function appendOutgoingMessage(user, chatId, text, messageId = null) {
     messageId: resolvedMessageId,
     direction: 'outgoing',
     senderDisplayName: user.displayName,
-    text,
+    text: viewOnce ? '' : text,
     sentAt,
-    status: 'sent'
+    status: 'sent',
+    viewOnce: Boolean(viewOnce),
+    viewOnceOpened: false,
+    expiresAt: expiresAt || null
   };
 
   const membersResult = await db.query(
@@ -337,9 +352,9 @@ async function appendOutgoingMessage(user, chatId, text, messageId = null) {
   try {
     await client.query('begin');
     await client.query(
-      `insert into v3_messages (message_id, conversation_id, sender_id, body, created_at)
-       values ($1, $2, $3, $4, $5::timestamptz)`,
-      [resolvedMessageId, chatId, user.userId, text, sentAt]
+      `insert into v3_messages (message_id, conversation_id, sender_id, body, view_once, expires_at, created_at)
+       values ($1, $2, $3, $4, $5, $6::timestamptz, $7::timestamptz)`,
+      [resolvedMessageId, chatId, user.userId, text, Boolean(viewOnce), expiresAt, sentAt]
     );
 
     for (const memberId of memberIds) {
@@ -369,7 +384,7 @@ async function appendOutgoingMessage(user, chatId, text, messageId = null) {
           chatId,
           isSender ? 0 : 1,
           resolvedMessageId,
-          text,
+          viewOnce ? '👁 View once message' : text,
           sentAt,
           isSender ? 'outgoing' : 'incoming',
           isSender ? 'sent' : 'sent',
@@ -687,6 +702,16 @@ async function adminListMessagesForChat(chatId, cursor = null, limit = 50) {
   };
 }
 
+async function openViewOnceMessage(user, messageId) {
+  const db = getPool();
+  await db.query(
+    `update v3_message_receipts
+     set view_once_opened_at = coalesce(view_once_opened_at, now())
+     where message_id = $1 and user_id = $2`,
+    [messageId, user.userId]
+  );
+}
+
 async function userHasAccess(user, chatId) {
   const db = getPool();
   const result = await db.query(
@@ -710,6 +735,7 @@ module.exports = {
   listChatsForUser,
   listMessagesForChat,
   appendOutgoingMessage,
+  openViewOnceMessage,
   markDelivered,
   markRead,
   markChatRead,

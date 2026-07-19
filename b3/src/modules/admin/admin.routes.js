@@ -39,15 +39,31 @@ function registerAdminRoutes(app) {
       });
     }
 
-    const items = await identity.listUsers({
+    const items = await identity.adminListUsers({
       query: parsed.data.q,
       limit: 100
     });
-    return {
-      success: true,
-      items
-    };
+    return { success: true, items };
   });
+
+  app.put('/api/v3/admin/users/:userId/disable', { preHandler: requireAdmin }, async (request, reply) => {
+    const userId = Number(request.params.userId);
+    if (!userId || userId >= 9000) {
+      return reply.status(400).send({ success: false, error: 'Invalid user' });
+    }
+    const { disabled } = request.body || {};
+    const user = await identity.setDisabled(userId, Boolean(disabled));
+    if (!user) {
+      return reply.status(404).send({ success: false, error: 'User not found' });
+    }
+    return { success: true, user };
+  });
+
+  app.delete('/api/v3/admin/seed-data', { preHandler: requireAdmin }, async () => {
+    await identity.cleanSeedData();
+    return { success: true };
+  });
+
   app.post('/api/v3/admin/users/:userId/reset-password', { preHandler: requireAdmin }, async (request, reply) => {
     const userId = Number(request.params.userId);
     if (!userId || userId >= 9000) {

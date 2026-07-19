@@ -1,4 +1,4 @@
-import { login, requestAdminSummary, requestAdminUsers, requestAdminChats, requestAdminResetPassword, requestAdminThread } from '../shared/apiClient.js';
+import { login, requestAdminSummary, requestAdminUsers, requestAdminChats, requestAdminResetPassword, requestAdminThread, requestAdminToggleDisabled, requestAdminCleanSeedData } from '../shared/apiClient.js';
 import { readTokens, readUser, clearTokens } from '../shared/tokenStore.js';
 
 export function createAdminPanelStore() {
@@ -111,6 +111,28 @@ export function createAdminPanelStore() {
     setState({ otpResult: null });
   }
 
+  async function toggleDisabled(userId, disabled) {
+    try {
+      await requestAdminToggleDisabled(userId, disabled);
+      setState({
+        users: state.users.map((u) =>
+          u.userId === userId ? { ...u, disabled } : u
+        )
+      });
+    } catch (err) {
+      setState({ error: err.message });
+    }
+  }
+
+  async function cleanSeedData() {
+    try {
+      await requestAdminCleanSeedData();
+      await loadData();
+    } catch (err) {
+      setState({ error: err.message });
+    }
+  }
+
   function setTab(tab) {
     setState({ activeTab: tab, monitorChat: null, monitorMessages: [] });
     if (tab === 'monitor' && state.chats.length === 0) loadChats();
@@ -139,6 +161,8 @@ export function createAdminPanelStore() {
     closeMonitorChat,
     resetPassword,
     clearOtp,
+    toggleDisabled,
+    cleanSeedData,
     setTab,
     signOut,
     getState() { return state; }

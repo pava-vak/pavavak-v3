@@ -33,13 +33,63 @@ function backButton() {
   return `<button class="thread-back" type="button" data-role="thread-back" aria-label="Back to chats">←</button>`;
 }
 
-function renderMessageBubble(item, showSender = false) {
+function expiryLabel(expiresAt) {
+  if (!expiresAt) return '';
+  const ms = new Date(expiresAt) - Date.now();
+  if (ms <= 0) return '';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `⏱ ${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `⏱ ${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `⏱ ${h}h`;
+  return `⏱ ${Math.floor(h / 24)}d`;
+}
+
+function renderViewOnceBubble(item) {
   const isOutgoing = item.direction === 'outgoing';
+  if (isOutgoing) {
+    return `
+      <article class="message-bubble message-outgoing">
+        <p class="message-text view-once-sent">👁 View once sent</p>
+        <footer class="message-meta">
+          <span class="bubble-time">${formatBubbleTime(item.sentAt)}</span>
+          ${renderTick(item.status)}
+        </footer>
+      </article>
+    `;
+  }
+  if (item.viewOnceOpened) {
+    return `
+      <article class="message-bubble message-incoming">
+        <p class="message-text view-once-opened">👁 Opened</p>
+        <footer class="message-meta">
+          <span class="bubble-time">${formatBubbleTime(item.sentAt)}</span>
+        </footer>
+      </article>
+    `;
+  }
+  return `
+    <article class="message-bubble message-incoming view-once-tap" data-role="open-view-once" data-message-id="${escapeHtml(item.messageId)}" data-text="${escapeHtml(item.text || '')}">
+      <p class="message-text view-once-prompt">👁 Tap to view</p>
+      <footer class="message-meta">
+        <span class="bubble-time">${formatBubbleTime(item.sentAt)}</span>
+      </footer>
+    </article>
+  `;
+}
+
+function renderMessageBubble(item, showSender = false) {
+  if (item.viewOnce) return renderViewOnceBubble(item);
+
+  const isOutgoing = item.direction === 'outgoing';
+  const expiry = expiryLabel(item.expiresAt);
   return `
     <article class="message-bubble ${isOutgoing ? 'message-outgoing' : 'message-incoming'}">
       ${showSender && item.senderDisplayName ? `<span class="bubble-sender">${escapeHtml(item.senderDisplayName)}</span>` : ''}
       <p class="message-text">${escapeHtml(item.text)}</p>
       <footer class="message-meta">
+        ${expiry ? `<span class="bubble-expiry">${expiry}</span>` : ''}
         <span class="bubble-time">${formatBubbleTime(item.sentAt)}</span>
         ${isOutgoing && !showSender ? renderTick(item.status) : ''}
       </footer>
@@ -61,7 +111,7 @@ function renderMessagesWithSeparators(items, showSender = false) {
   return parts.join('');
 }
 
-export function renderChatThreadView({ activeChat, threadState, composerValue = '', readOnly = false }) {
+export function renderChatThreadView({ activeChat, threadState, composerValue = '', readOnly = false, viewOnce = false, deleteAfter = 'never' }) {
   if (!activeChat) {
     return `
       <section class="thread-panel empty-thread">
@@ -134,17 +184,31 @@ export function renderChatThreadView({ activeChat, threadState, composerValue = 
       </div>
       ${!readOnly && threadState.sendError ? `<p class="error-text send-error">${escapeHtml(threadState.sendError)}</p>` : ''}
       ${readOnly ? '' : `
+        <div class="composer-privacy-bar">
+          <button type="button"
+            class="privacy-toggle ${viewOnce ? 'privacy-toggle-active' : ''}"
+            data-role="toggle-view-once"
+            title="${viewOnce ? 'View once: ON — tap to turn off' : 'View once: OFF — tap to turn on'}">
+            👁 ${viewOnce ? 'View Once' : 'Once'}
+          </button>
+          <select class="privacy-timer" data-role="delete-after-select" title="Auto-delete after">
+            <option value="never" ${deleteAfter === 'never' ? 'selected' : ''}>⏱ Never</option>
+            <option value="1h"   ${deleteAfter === '1h'    ? 'selected' : ''}>⏱ 1 hour</option>
+            <option value="24h"  ${deleteAfter === '24h'   ? 'selected' : ''}>⏱ 24 hours</option>
+            <option value="7d"   ${deleteAfter === '7d'    ? 'selected' : ''}>⏱ 7 days</option>
+          </select>
+        </div>
         <form class="thread-composer" data-role="thread-form">
           <textarea
             class="composer-input"
             data-role="composer-input"
-            placeholder="Message…"
+            placeholder="${viewOnce ? '👁 View once message…' : 'Message…'}"
             autocomplete="off"
             rows="1"
             ${threadState.sendStatus === 'sending' ? 'disabled' : ''}
           >${escapeHtml(composerValue)}</textarea>
           <button type="submit" class="send-button primary-button" aria-label="Send" ${threadState.sendStatus === 'sending' ? 'disabled' : ''}>
-            ${threadState.sendStatus === 'sending' ? '…' : '➤'}
+            ${threadState.sendStatus === 'sending' ? '…' : (viewOnce ? '👁' : '➤')}
           </button>
         </form>
       `}
@@ -157,9 +221,29 @@ function autoGrow(el) {
   el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
 }
 
-export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRetry, onBack }) {
+export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRetry, onBack, onOpenViewOnce, onToggleViewOnce, onSetDeleteAfter }) {
   const form = root.querySelector('[data-role="thread-form"]');
   const input = root.querySelector('[data-role="composer-input"]');
+
+  root.querySelectorAll('[data-role="open-view-once"]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const messageId = el.dataset.messageId;
+      const text = el.dataset.text;
+      if (!text) return;
+      el.innerHTML = `<p class="message-text">${escapeHtml(text)}</p><footer class="message-meta"><span class="bubble-time"></span></footer>`;
+      el.classList.remove('view-once-tap');
+      el.removeAttribute('data-role');
+      onOpenViewOnce?.(messageId);
+    });
+  });
+
+  root.querySelector('[data-role="toggle-view-once"]')?.addEventListener('click', () => {
+    onToggleViewOnce?.();
+  });
+
+  root.querySelector('[data-role="delete-after-select"]')?.addEventListener('change', (e) => {
+    onSetDeleteAfter?.(e.target.value);
+  });
 
   root.querySelector('[data-role="thread-back"]')?.addEventListener('click', () => onBack?.());
 

@@ -4,12 +4,25 @@ const chatAdapter = require('../../db/chatAdapter');
 const realtime = require('../../realtime/eventEmitter');
 const { sendPushToUser } = require('../notifications/push.service');
 
+const DELETE_AFTER_DURATIONS = {
+  '1h': 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000
+};
+
 const sendMessageSchema = z.object({
   chatId: z.string().min(1),
-  text: z.string().trim().min(1).max(4000)
+  text: z.string().trim().min(1).max(4000),
+  viewOnce: z.boolean().default(false),
+  deleteAfter: z.enum(['never', '1h', '24h', '7d']).default('never')
 });
 
 function registerMessageRoutes(app) {
+  app.post('/api/v3/messages/:messageId/view-once-open', { preHandler: requireAuth }, async (request) => {
+    await chatAdapter.openViewOnceMessage(request.auth, request.params.messageId);
+    return { success: true };
+  });
+
   app.post('/api/v3/messages', {
     preHandler: requireAuth,
     config: {
@@ -29,10 +42,16 @@ function registerMessageRoutes(app) {
     }
 
     try {
+      const expiresAt = parsed.data.deleteAfter !== 'never'
+        ? new Date(Date.now() + DELETE_AFTER_DURATIONS[parsed.data.deleteAfter]).toISOString()
+        : null;
+
       const message = await chatAdapter.appendOutgoingMessage(
         request.auth,
         parsed.data.chatId,
-        parsed.data.text
+        parsed.data.text,
+        null,
+        { viewOnce: parsed.data.viewOnce, expiresAt }
       );
 
       const memberIds = await chatAdapter.getConversationMemberUserIds(parsed.data.chatId);
@@ -67,9 +86,9 @@ function registerMessageRoutes(app) {
           sendPushToUser(memberId, {
             chatId: parsed.data.chatId,
             title: request.auth.displayName || request.auth.username,
-            body: parsed.data.text.length > 100
-              ? parsed.data.text.slice(0, 97) + '…'
-              : parsed.data.text,
+            body: parsed.data.viewOnce
+              ? '👁 View once message'
+              : (parsed.data.text.length > 100 ? parsed.data.text.slice(0, 97) + '…' : parsed.data.text),
             icon: '/icon.svg',
             badge: '/icon.svg'
           }).catch(() => {});

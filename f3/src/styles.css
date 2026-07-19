@@ -1764,3 +1764,114 @@ input {
   .ap-monitor-msg { grid-template-columns: 90px 1fr; }
   .ap-monitor-time { display: none; }
 }
+
+/* ── Admin: new user management UI ───────────────────────────────────── */
+.ap-toolbar { display: flex; gap: 0.5rem; padding: 0 0 0.75rem; }
+.ap-danger-btn {
+  background: transparent;
+  border: 1px solid var(--v3-danger);
+  color: var(--v3-danger);
+  border-radius: 6px;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ap-danger-btn:hover { background: rgba(180, 35, 24, 0.08); }
+.ap-row-disabled td { opacity: 0.55; }
+.ap-role-disabled { background: rgba(180, 35, 24, 0.1); color: var(--v3-danger); }
+.ap-td-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.ap-action-enable { border-color: var(--v3-accent); color: var(--v3-accent); }
+.ap-action-disable { border-color: var(--v3-danger); color: var(--v3-danger); }
+
+/* ── Settings modal ──────────────────────────────────────────────────── */
+.settings-overlay {
+  position: fixed; inset: 0; z-index: 9000;
+  background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 1rem;
+}
+.settings-modal {
+  background: var(--v3-surface-solid);
+  border-radius: 14px;
+  width: 100%; max-width: 440px;
+  box-shadow: 0 8px 32px var(--v3-shadow);
+  overflow: hidden;
+}
+.settings-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--v3-border);
+}
+.settings-title { font-size: 1.1rem; font-weight: 700; color: var(--v3-text); margin: 0; }
+.settings-close {
+  background: none; border: none; cursor: pointer;
+  color: var(--v3-muted); font-size: 1rem; padding: 0.25rem;
+}
+.settings-body { padding: 1.25rem; }
+.settings-section-title { font-size: 0.95rem; font-weight: 600; color: var(--v3-text); margin: 0 0 0.25rem; }
+.settings-section-sub { font-size: 0.8rem; color: var(--v3-muted); margin: 0 0 1rem; }
+.settings-form { display: flex; flex-direction: column; gap: 0.75rem; }
+.settings-field { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; color: var(--v3-muted); }
+.settings-input {
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--v3-border);
+  border-radius: 8px;
+  background: var(--v3-field-bg);
+  color: var(--v3-text);
+  font-size: 0.9rem;
+}
+.settings-input:focus { outline: none; border-color: var(--v3-accent); }
+.settings-submit { margin-top: 0.25rem; }
+.settings-error {
+  padding: 0.6rem 0.75rem; border-radius: 8px;
+  background: rgba(180, 35, 24, 0.08); color: var(--v3-danger);
+  font-size: 0.85rem; margin-bottom: 0.5rem;
+}
+.settings-success {
+  padding: 0.6rem 0.75rem; border-radius: 8px;
+  background: var(--v3-accent-soft); color: var(--v3-accent);
+  font-size: 0.85rem; margin-bottom: 0.5rem;
+}
+
+/* ── View-once + auto-delete composer ────────────────────────────────── */
+.composer-privacy-bar {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.35rem 0.75rem 0;
+}
+.privacy-toggle {
+  background: none; border: 1px solid var(--v3-border);
+  border-radius: 20px; padding: 0.2rem 0.65rem;
+  font-size: 0.78rem; cursor: pointer; color: var(--v3-muted);
+  transition: all 0.15s;
+}
+.privacy-toggle:hover { border-color: var(--v3-accent); color: var(--v3-accent); }
+.privacy-toggle-active {
+  background: var(--v3-accent-soft);
+  border-color: var(--v3-accent);
+  color: var(--v3-accent); font-weight: 600;
+}
+.privacy-timer {
+  background: none; border: 1px solid var(--v3-border);
+  border-radius: 20px; padding: 0.2rem 0.5rem;
+  font-size: 0.78rem; cursor: pointer; color: var(--v3-muted);
+  appearance: none; -webkit-appearance: none;
+}
+.privacy-timer:focus { outline: none; border-color: var(--v3-accent); }
+
+/* ── View-once message bubbles ───────────────────────────────────────── */
+.view-once-tap {
+  cursor: pointer;
+  background: var(--v3-accent-soft) !important;
+  border: 1.5px solid var(--v3-accent-border);
+}
+.view-once-tap:hover { filter: brightness(0.97); }
+.view-once-prompt { color: var(--v3-accent); font-style: italic; font-size: 0.9rem; }
+.view-once-sent { color: var(--v3-muted); font-style: italic; font-size: 0.9rem; }
+.view-once-opened { color: var(--v3-muted); font-style: italic; font-size: 0.9rem; }
+
+/* ── Expiry timer badge ──────────────────────────────────────────────── */
+.bubble-expiry {
+  font-size: 0.7rem; color: var(--v3-muted);
+  margin-right: 0.3rem; opacity: 0.75;
+}
