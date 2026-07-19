@@ -32,8 +32,11 @@ function renderLoginPage(state) {
           </label>
           <label class="ap-field">
             <span class="ap-field-label">Password</span>
-            <input class="ap-input" name="password" type="password"
-              autocomplete="current-password" required />
+            <span class="password-field">
+              <input class="ap-input" name="password" type="password"
+                autocomplete="current-password" required />
+              <button type="button" class="password-toggle" data-role="password-toggle" aria-label="Show password">Show</button>
+            </span>
           </label>
           <button class="ap-login-btn" type="submit" ${isLoading ? 'disabled' : ''}>
             ${isLoading ? 'Signing in…' : 'Sign in as Admin'}
@@ -228,6 +231,48 @@ function renderMonitorTab(state) {
   `;
 }
 
+function renderChangePwModal(state) {
+  return `
+    <div class="ap-change-pw-overlay" data-role="ap-change-pw-overlay">
+      <div class="ap-change-pw-modal" role="dialog" aria-modal="true" aria-label="Change Password">
+        <div class="ap-change-pw-header">
+          <h2>Change Password</h2>
+          <button type="button" class="ap-close-btn" data-role="ap-change-pw-close" aria-label="Close">✕</button>
+        </div>
+        ${state.changePwError ? `<p class="ap-error" role="alert">${escapeHtml(state.changePwError)}</p>` : ''}
+        ${state.changePwSuccess ? `<p class="ap-pw-success" role="status">✓ Password changed successfully.</p>` : ''}
+        <form class="ap-change-pw-form" data-role="ap-change-pw-form">
+          <label class="ap-field">
+            <span class="ap-field-label">Current password</span>
+            <span class="password-field">
+              <input class="ap-input" name="currentPassword" type="password"
+                autocomplete="current-password" required />
+              <button type="button" class="password-toggle" data-role="password-toggle" aria-label="Show password">Show</button>
+            </span>
+          </label>
+          <label class="ap-field">
+            <span class="ap-field-label">New password <span class="ap-field-hint">(min 8 characters)</span></span>
+            <span class="password-field">
+              <input class="ap-input" name="newPassword" type="password"
+                autocomplete="new-password" minlength="8" required />
+              <button type="button" class="password-toggle" data-role="password-toggle" aria-label="Show password">Show</button>
+            </span>
+          </label>
+          <label class="ap-field">
+            <span class="ap-field-label">Confirm new password</span>
+            <span class="password-field">
+              <input class="ap-input" name="confirmPassword" type="password"
+                autocomplete="new-password" minlength="8" required />
+              <button type="button" class="password-toggle" data-role="password-toggle" aria-label="Show password">Show</button>
+            </span>
+          </label>
+          <button class="ap-login-btn" type="submit">Update Password</button>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
 function renderDashboard(state) {
   const { activeTab, user } = state;
   const tabLabel = activeTab === 'users' ? 'Users' : 'Monitor';
@@ -246,6 +291,7 @@ function renderDashboard(state) {
         </nav>
         <div class="ap-header-right">
           <span class="ap-header-user">${escapeHtml(user?.displayName || user?.username || '')}</span>
+          <button class="ap-change-pw-btn" data-role="ap-open-change-pw" title="Change your password">🔑 Password</button>
           <button class="ap-signout-btn" data-role="ap-signout">Sign out</button>
         </div>
       </header>
@@ -258,11 +304,26 @@ function renderDashboard(state) {
         ${activeTab === 'users' ? renderUsersTab(state) : renderMonitorTab(state)}
       </main>
     </div>
+    ${state.changePwOpen ? renderChangePwModal(state) : ''}
   `;
 }
 
 export function renderAdminPanel(root) {
   const store = createAdminPanelStore();
+
+  function bindPasswordToggles(scope) {
+    (scope || root).querySelectorAll('[data-role="password-toggle"]').forEach((toggle) => {
+      toggle.addEventListener('click', () => {
+        const input = toggle.parentElement?.querySelector('input');
+        if (!input) return;
+        const show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        toggle.textContent = show ? 'Hide' : 'Show';
+        toggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+        input.focus();
+      });
+    });
+  }
 
   function bind() {
     const state = store.getState();
@@ -277,6 +338,7 @@ export function renderAdminPanel(root) {
           password: String(fd.get('password') || '')
         });
       });
+      bindPasswordToggles();
       return;
     }
 
@@ -311,6 +373,34 @@ export function renderAdminPanel(root) {
       );
     });
     root.querySelector('[data-role="monitor-back"]')?.addEventListener('click', () => store.closeMonitorChat());
+
+    root.querySelector('[data-role="ap-open-change-pw"]')?.addEventListener('click', () => store.openChangePw());
+
+    const overlay = root.querySelector('[data-role="ap-change-pw-overlay"]');
+    if (overlay) {
+      overlay.addEventListener('click', (e) => { if (e.target === e.currentTarget) store.closeChangePw(); });
+      root.querySelector('[data-role="ap-change-pw-close"]')?.addEventListener('click', () => store.closeChangePw());
+      const pwForm = root.querySelector('[data-role="ap-change-pw-form"]');
+      pwForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(pwForm);
+        const currentPassword = String(fd.get('currentPassword') || '');
+        const newPassword = String(fd.get('newPassword') || '');
+        const confirmPassword = String(fd.get('confirmPassword') || '');
+        const confirmInput = pwForm.querySelector('[name="confirmPassword"]');
+        if (newPassword !== confirmPassword) {
+          confirmInput?.setCustomValidity('Passwords do not match.');
+          pwForm.reportValidity();
+          return;
+        }
+        confirmInput?.setCustomValidity('');
+        const btn = pwForm.querySelector('[type="submit"]');
+        if (btn) btn.disabled = true;
+        await store.submitChangePw({ currentPassword, newPassword });
+        if (btn) btn.disabled = false;
+      });
+      bindPasswordToggles(overlay);
+    }
   }
 
   store.subscribe((state) => {

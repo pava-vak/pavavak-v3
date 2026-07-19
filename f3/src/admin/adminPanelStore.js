@@ -1,4 +1,4 @@
-import { login, requestAdminSummary, requestAdminUsers, requestAdminChats, requestAdminResetPassword, requestAdminThread, requestAdminToggleDisabled, requestAdminCleanSeedData } from '../shared/apiClient.js';
+import { login, requestAdminSummary, requestAdminUsers, requestAdminChats, requestAdminResetPassword, requestAdminThread, requestAdminToggleDisabled, requestAdminCleanSeedData, changePassword } from '../shared/apiClient.js';
 import { readTokens, readUser, clearTokens } from '../shared/tokenStore.js';
 
 export function createAdminPanelStore() {
@@ -15,7 +15,10 @@ export function createAdminPanelStore() {
     monitorLoading: false,
     usersLoading: false,
     chatsLoading: false,
-    otpResult: null
+    otpResult: null,
+    changePwOpen: false,
+    changePwError: '',
+    changePwSuccess: false
   };
 
   const listeners = new Set();
@@ -143,8 +146,27 @@ export function createAdminPanelStore() {
     setState({
       status: 'login', user: null, error: '',
       summary: null, users: [], chats: [],
-      monitorChat: null, monitorMessages: [], otpResult: null
+      monitorChat: null, monitorMessages: [], otpResult: null,
+      changePwOpen: false, changePwError: '', changePwSuccess: false
     });
+  }
+
+  function openChangePw() {
+    setState({ changePwOpen: true, changePwError: '', changePwSuccess: false });
+  }
+
+  function closeChangePw() {
+    setState({ changePwOpen: false, changePwError: '', changePwSuccess: false });
+  }
+
+  async function submitChangePw({ currentPassword, newPassword }) {
+    setState({ changePwError: '', changePwSuccess: false });
+    try {
+      await changePassword({ currentPassword, newPassword });
+      setState({ changePwSuccess: true, changePwError: '' });
+    } catch (err) {
+      setState({ changePwError: err.message || 'Failed to change password.' });
+    }
   }
 
   return {
@@ -165,6 +187,9 @@ export function createAdminPanelStore() {
     cleanSeedData,
     setTab,
     signOut,
+    openChangePw,
+    closeChangePw,
+    submitChangePw,
     getState() { return state; }
   };
 }

@@ -20,18 +20,27 @@ export function renderSettingsModal() {
             <form class="settings-form" data-role="change-password-form">
               <label class="settings-field">
                 <span>Current password</span>
-                <input class="settings-input" name="currentPassword" type="password"
-                  autocomplete="current-password" required />
+                <span class="password-field">
+                  <input class="settings-input" name="currentPassword" type="password"
+                    autocomplete="current-password" required />
+                  <button type="button" class="password-toggle" data-role="password-toggle" aria-label="Show password">Show</button>
+                </span>
               </label>
               <label class="settings-field">
                 <span>New password</span>
-                <input class="settings-input" name="newPassword" type="password"
-                  autocomplete="new-password" minlength="8" required />
+                <span class="password-field">
+                  <input class="settings-input" name="newPassword" type="password"
+                    autocomplete="new-password" minlength="8" required />
+                  <button type="button" class="password-toggle" data-role="password-toggle" aria-label="Show password">Show</button>
+                </span>
               </label>
               <label class="settings-field">
                 <span>Confirm new password</span>
-                <input class="settings-input" name="confirmPassword" type="password"
-                  autocomplete="new-password" minlength="8" required />
+                <span class="password-field">
+                  <input class="settings-input" name="confirmPassword" type="password"
+                    autocomplete="new-password" minlength="8" required />
+                  <button type="button" class="password-toggle" data-role="password-toggle" aria-label="Show password">Show</button>
+                </span>
               </label>
               <button class="settings-submit primary-button" type="submit">Update Password</button>
             </form>
@@ -46,6 +55,18 @@ export function bindSettingsModal(root, { onClose }) {
   root.querySelector('[data-role="settings-close"]')?.addEventListener('click', onClose);
   root.querySelector('[data-role="settings-overlay"]')?.addEventListener('click', (e) => {
     if (e.target === e.currentTarget) onClose();
+  });
+
+  root.querySelectorAll('.settings-modal [data-role="password-toggle"]').forEach((toggle) => {
+    toggle.addEventListener('click', () => {
+      const input = toggle.parentElement?.querySelector('input');
+      if (!input) return;
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      toggle.textContent = show ? 'Hide' : 'Show';
+      toggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+      input.focus();
+    });
   });
 
   const form = root.querySelector('[data-role="change-password-form"]');
