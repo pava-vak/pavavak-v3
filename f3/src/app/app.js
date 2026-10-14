@@ -428,17 +428,13 @@ export function renderAppShell(root) {
   let installPrompt = null;
   let installBannerDismissed = localStorage.getItem('pava-install-dismissed') === '1';
   let appLocked = isLockEnabled();
-  // If a credential is already enrolled, we know biometric is available — synchronous, instant.
-  // isPlatformAvailable() is only run in the background to update the settings UI toggle.
   let biometricAvailable = hasBiometricEnrolled();
-  let biometricChecked = true; // no async gate needed — hasBiometricEnrolled() is synchronous
   let lockError = '';
-  let onboarding = null; // { step, pinFirst, pinEntry, error }
+  let onboarding = null;
   let lockShowPin = false;
   let lockPinEntry = '';
-
-  // Fire biometric on manual retry (tap fingerprint button on lock screen).
   let biometricFiring = false;
+
   function fireImmediateBiometric() {
     if (biometricFiring) return;
     biometricFiring = true;
@@ -448,7 +444,7 @@ export function renderAppShell(root) {
       lockShowPin = false;
       lockPinEntry = '';
       lockError = '';
-      render(); // render() calls removeSplash() with double-rAF — no flash
+      render();
     }).catch(() => {
       biometricFiring = false;
       lockError = hasPin() ? 'Biometric failed — use passcode.' : 'Unlock failed. Tap to retry.';
@@ -456,15 +452,13 @@ export function renderAppShell(root) {
     });
   }
 
-  // Fire verify() immediately — parallel with session network validation.
-  // Native apps (WhatsApp) do this in onResume/viewDidAppear before any network call.
-  // We do the same: don't wait for fetchMe() to finish before showing biometric dialog.
+  // Fire verify() immediately on app load — parallel with session network check.
+  // data-locked attribute (set by lock-splash.js) keeps #app hidden until we unlock.
   if (appLocked && biometricAvailable) {
     biometricFiring = true;
     verify().then(() => {
       biometricFiring = false;
       appLocked = false; lockShowPin = false; lockPinEntry = ''; lockError = '';
-      // render() calls removeSplash() with double-rAF — no flash of previous content
       if (sessionState.status === 'authenticated') render();
     }).catch(() => {
       biometricFiring = false;
@@ -473,13 +467,10 @@ export function renderAppShell(root) {
     });
   }
 
-  // Background check — only to update the "Enable Biometric" button in settings.
   isPlatformAvailable().then((ok) => {
     biometricAvailable = ok || hasBiometricEnrolled();
   });
 
-  // Dynamic viewport height — makes the layout shrink when the keyboard appears
-  // (iOS PWA doesn't resize the viewport on keyboard open; visualViewport does)
   let _prevVpHeight = 0;
   function _updateVH() {
     const h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
@@ -489,7 +480,6 @@ export function renderAppShell(root) {
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', () => {
       const newH = _updateVH();
-      // Keyboard opened (height shrank) → scroll thread to bottom so composer is visible
       if (newH < _prevVpHeight - 50 && activeChat) {
         const c = root.querySelector('[data-role="thread-messages"]');
         if (c) requestAnimationFrame(() => c.scrollTo({ top: c.scrollHeight, behavior: 'instant' }));
@@ -531,7 +521,6 @@ export function renderAppShell(root) {
     mobileTab = 'chats';
   }
 
-  // Lock on background / resume based on timer setting
   document.addEventListener('visibilitychange', () => {
     if (!isLockEnabled()) {
       if (!document.hidden) render();
@@ -541,7 +530,8 @@ export function renderAppShell(root) {
     const timer = getLockTimer();
     if (document.hidden) {
       sessionStorage.setItem('pava-last-active', Date.now().toString());
-      biometricFiring = false; // reset so next foreground resume fires fresh
+      biometricFiring = false;
+      lockError = '';
       if (timer === 0) {
         appLocked = true;
         lockShowPin = false;
@@ -549,19 +539,10 @@ export function renderAppShell(root) {
         lockError = '';
         closeAllForLock();
       }
-      // Cover the screen immediately so no content is visible in the app switcher
-      if (sessionState.status === 'authenticated') {
-        let splash = document.getElementById('app-lock-splash');
-        if (!splash) {
-          splash = document.createElement('div');
-          splash.id = 'app-lock-splash';
-          splash.className = 'app-lock-splash-cover';
-          splash.innerHTML = '<div style="font-size:48px;line-height:1">🔐</div><p class="app-lock-splash-label">Pava Vak</p>';
-          document.body.appendChild(splash);
-        }
-      }
+      ensureSplash();
     } else {
-      // Coming to foreground
+      ensureSplash();
+
       if (!appLocked && timer > 0) {
         const elapsed = (Date.now() - parseInt(sessionStorage.getItem('pava-last-active') || '0', 10)) / 1000;
         if (elapsed >= timer) {
@@ -572,20 +553,19 @@ export function renderAppShell(root) {
           closeAllForLock();
         }
       }
-      if (appLocked && sessionState.status === 'authenticated') {
-        render(); // renders lock screen UI
-        // Auto-fire biometric immediately — no tap needed
-        if (biometricAvailable && !biometricFiring) {
+
+      if (appLocked) {
+        if (biometricAvailable && !biometricFiring && !lockShowPin && !lockError) {
           fireImmediateBiometric();
         }
+        if (sessionState.status === 'authenticated') render();
       } else {
-        document.getElementById('app-lock-splash')?.remove();
+        removeSplash();
         render();
       }
     }
   });
 
-  // Keep last-active fresh for timer-based locking
   ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => {
     document.addEventListener(ev, () => {
       if (getLockTimer() > 0 && isLockEnabled()) {
@@ -1006,40 +986,41 @@ export function renderAppShell(root) {
     }
   }
 
+  function ensureSplash() {
+    document.documentElement.setAttribute('data-locked', '1');
+    if (!document.getElementById('app-lock-splash')) {
+      const el = document.createElement('div');
+      el.id = 'app-lock-splash';
+      el.className = 'app-lock-splash-cover';
+      el.innerHTML = '<div style="font-size:48px;line-height:1">🔐</div><p class="app-lock-splash-label">Pava Vak</p>';
+      document.body.appendChild(el);
+    }
+  }
+
   function removeSplash() {
+    document.documentElement.removeAttribute('data-locked');
     const el = document.getElementById('app-lock-splash');
     if (!el) return;
-    // Double rAF: wait for the browser to actually paint the new content
-    // before removing the cover, so there's zero flash of the previous view.
     requestAnimationFrame(() => requestAnimationFrame(() => el.remove()));
   }
 
   function render() {
     const composerSnapshot = captureComposerState();
 
-    // While session is still loading OR biometric check is pending AND lock is enabled,
-    // keep the splash overlay visible. Nothing renders underneath — not even the loading shell.
-    if (appLocked && (sessionState.status === 'loading' || !biometricChecked)) {
+    if (appLocked && sessionState.status === 'loading') {
       return;
     }
 
-    // Show lock screen if biometric lock is active
     if (appLocked && sessionState.status === 'authenticated') {
-      // If biometric is ready and no prior error: fire immediately, keep splash up,
-      // don't touch the DOM at all — lock screen only appears if biometric fails.
-      if (biometricAvailable && !lockShowPin && !lockError) {
-        fireImmediateBiometric();
+      if (biometricAvailable && !lockShowPin && !lockError && biometricFiring) {
         return;
       }
       root.innerHTML = renderLockScreen(lockError, lockShowPin, lockPinEntry, biometricAvailable);
       removeSplash();
 
-      // Biometric retry / manual trigger (tap the fingerprint circle)
       const fireBiometric = async () => {
         lockError = '';
-        biometricFiring = false; // allow re-fire on manual tap
-        // Don't re-render here — calling verify() shows the native dialog instantly.
-        // Only re-render after it resolves (success or failure).
+        biometricFiring = false;
         try {
           await verify();
           appLocked = false; lockShowPin = false; lockPinEntry = ''; lockError = '';
@@ -1060,16 +1041,12 @@ export function renderAppShell(root) {
         lockShowPin = false; lockError = ''; lockPinEntry = ''; render();
       });
 
-      // Native PIN input — mobile keyboard pops up automatically
       const pinInput = root.querySelector('[data-role="pin-native-input"]');
       if (pinInput) {
-        // Focus immediately (we're still inside a click event → iOS opens keyboard)
         pinInput.focus();
-        // Tapping the dots also opens the keyboard if focus was lost
         root.querySelector('[data-role="pin-dots"]')?.addEventListener('click', () => pinInput.focus());
 
         pinInput.addEventListener('input', async () => {
-          // Strip any non-numeric characters the OS might sneak in
           pinInput.value = pinInput.value.replace(/\D/g, '').slice(0, 4);
           lockPinEntry = pinInput.value;
 
@@ -1194,7 +1171,7 @@ export function renderAppShell(root) {
 
     if (sessionState.status === 'loading') {
       root.innerHTML = renderLoadingShell();
-      removeSplash();
+      if (!appLocked) removeSplash();
       return;
     }
 
@@ -1237,7 +1214,6 @@ export function renderAppShell(root) {
       root.querySelector('[data-role="open-scheduled"]')?.addEventListener('click', () => {
         openScheduledMsgsPanel();
       });
-      // ── Global search ──────────────────────────────────────────────────
       root.querySelector('[data-role="open-search"]')?.addEventListener('click', () => {
         searchOpen = true;
         searchQuery = '';
@@ -1392,10 +1368,8 @@ export function renderAppShell(root) {
         onReact: async (messageId, emoji) => {
           if (!activeChat) return;
           try {
-            const { reactToMessage } = await import('../shared/apiClient.js');
+            const { reactToMessage, fetchChatReactions } = await import('../shared/apiClient.js');
             await reactToMessage(messageId, emoji);
-            // Optimistic update handled via socket event; just reload reactions
-            const { fetchChatReactions } = await import('../shared/apiClient.js');
             const data = await fetchChatReactions(activeChat.chatId);
             if (data?.reactions) { reactions = data.reactions; render(); }
           } catch (err) { showToast(err?.message || 'Reaction failed'); }
@@ -1571,23 +1545,7 @@ export function renderAppShell(root) {
 
       }
 
-      // ── Chat Info Panel ──────────────────────────────────────────────────
-      // Open on header avatar/title click
-      root.querySelector('.thread-header-avatar-wrap')?.addEventListener('click', () => {
-        if (!activeChat || isMonitoring) return;
-        chatInfoOpen = true;
-        chatInfoMembers = null;
-        render();
-        // Load members for groups
-        const isGroup = activeChat.chatType === 'group' || activeChat.chatId?.startsWith('grp-');
-        if (isGroup) {
-          import('../shared/apiClient.js').then(({ fetchChatMembers }) => fetchChatMembers(activeChat.chatId)).then(data => {
-            chatInfoMembers = data?.members || [];
-            render();
-          }).catch(() => {});
-        }
-      });
-      root.querySelector('.thread-header-info')?.addEventListener('click', () => {
+      const openChatInfo = () => {
         if (!activeChat || isMonitoring) return;
         chatInfoOpen = true;
         chatInfoMembers = null;
@@ -1599,7 +1557,9 @@ export function renderAppShell(root) {
             render();
           }).catch(() => {});
         }
-      });
+      };
+      root.querySelector('.thread-header-avatar-wrap')?.addEventListener('click', openChatInfo);
+      root.querySelector('.thread-header-info')?.addEventListener('click', openChatInfo);
 
       if (chatInfoOpen && activeChat) {
         const panel = root.querySelector('[data-role="chat-info-panel"]');
@@ -1713,10 +1673,8 @@ export function renderAppShell(root) {
             const identifier = input.value.trim();
             if (!identifier) return;
             try {
-              const { addGroupMember } = await import('../shared/apiClient.js');
+              const { addGroupMember, fetchChatMembers } = await import('../shared/apiClient.js');
               await addGroupMember(activeChat.chatId, identifier);
-              // Reload members list
-              const { fetchChatMembers } = await import('../shared/apiClient.js');
               chatInfoMembers = await fetchChatMembers(activeChat.chatId);
               render();
             } catch (err) {

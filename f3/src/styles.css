@@ -4981,12 +4981,18 @@ html, body { height: 100%; overscroll-behavior: none; }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
-/* ── App lock splash cover (used while going to background) ─────────── */
+/* ── App lock: CSS-level protection ──────────────────────────────────
+   html[data-locked] is stamped by lock-splash.js synchronously before
+   any JS module loads, so #app content is hidden before the first paint.
+   JS removes the attribute only after successful auth.                  */
+html[data-locked] #app { visibility: hidden; }
+
+/* ── App lock splash cover (shown while locked / going to background) ─ */
 .app-lock-splash-cover {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: var(--v3-bg);
+  background: var(--v3-bg, #0b1326);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4994,7 +5000,7 @@ html, body { height: 100%; overscroll-behavior: none; }
   gap: 8px;
 }
 .app-lock-splash-label {
-  color: var(--v3-muted);
+  color: var(--v3-muted, #8f9097);
   margin: 0;
   font: 600 12px/1 system-ui, sans-serif;
   letter-spacing: .12em;
