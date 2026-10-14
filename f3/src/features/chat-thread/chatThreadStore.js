@@ -1,4 +1,4 @@
-import { markChatRead, markDelivered, openViewOnceMessage, requestAdminThread, requestThread, sendMessage } from '../../shared/apiClient.js';
+import { markChatRead, markDelivered, openViewOnceMessage, requestAdminThread, requestClearChat, requestDeleteMessage, requestThread, sendMessage } from '../../shared/apiClient.js';
 import { emitTypingStart, emitTypingStop, joinChat } from '../../shared/socketClient.js';
 
 export function createChatThreadStore() {
@@ -62,6 +62,7 @@ export function createChatThreadStore() {
 
   async function openChat(chatId) {
     const generation = ++openGeneration;
+    if (typingTimer) { clearTimeout(typingTimer); typingTimer = null; }
     setState({
       status: 'loading',
       chatId,
@@ -92,20 +93,16 @@ export function createChatThreadStore() {
         sendError: ''
       });
 
-      await markChatRead(chatId);
-      if (generation !== openGeneration) return;
+      // markChatRead is best-effort — a failure must NOT reset the loaded thread
+      markChatRead(chatId).then(() => {
+        if (generation !== openGeneration) return;
+        setState({
+          items: state.items.map((item) =>
+            item.direction === 'incoming' ? { ...item, status: 'read' } : item
+          )
+        });
+      }).catch(() => {});
 
-      setState({
-        items: state.items.map((item) =>
-          item.direction === 'incoming' ? { ...item, status: 'read' } : item
-        )
-      });
-
-      for (const item of result.items || []) {
-        if (item.direction === 'incoming' && item.status === 'sent') {
-          markDelivered(chatId, item.messageId).catch(() => {});
-        }
-      }
     } catch (error) {
       if (generation !== openGeneration) return;
       setState({
@@ -167,9 +164,13 @@ export function createChatThreadStore() {
       return;
     }
 
+    const chatIdAtStart = state.chatId;
+    const cursorAtStart = state.nextCursor;
     setState({ loadMoreStatus: 'loading' });
     try {
-      const result = await requestThread(state.chatId, state.nextCursor);
+      const result = await requestThread(chatIdAtStart, cursorAtStart);
+      // Abort if user switched to a different chat while we were loading
+      if (state.chatId !== chatIdAtStart) return;
       const existingIds = new Set(state.items.map((item) => item.messageId));
       const older = (result.items || []).filter((item) => !existingIds.has(item.messageId));
       setState({
@@ -180,8 +181,8 @@ export function createChatThreadStore() {
       });
     } catch (error) {
       setState({
-        loadMoreStatus: 'error',
-        sendError: error.message || 'Failed to load older messages'
+        loadMoreStatus: 'error'
+        // Note: do NOT write to sendError here — that field is for the composer
       });
     }
   }
@@ -189,6 +190,7 @@ export function createChatThreadStore() {
   async function submitMessage(text) {
     const trimmedText = String(text || '').trim();
     if (!state.chatId || !trimmedText) return null;
+    if (state.sendStatus === 'sending') return null;
 
     const tempId = `temp-${Date.now()}`;
     const optimisticMessage = {
@@ -251,15 +253,35 @@ export function createChatThreadStore() {
     if (event === 'message:new' && payload.message) {
       appendMessageIfNew(payload.message);
       if (payload.message.direction === 'incoming') {
-        markDelivered(state.chatId, payload.message.messageId).catch(() => {});
+        // markChatRead already sets delivered_at, so no need for a separate markDelivered call
         markChatRead(state.chatId).catch(() => {});
         updateMessageStatus(payload.message.messageId, 'read');
       }
       return;
     }
 
+    if (event === 'message:deleted') {
+      setState({
+        items: state.items.map((item) =>
+          item.messageId === payload.messageId ? { ...item, deleted: true, text: '' } : item
+        )
+      });
+      return;
+    }
+
     if (event === 'message:delivered' || event === 'message:read') {
       updateMessageStatus(payload.messageId, payload.status);
+      return;
+    }
+
+    if (event === 'message:edited' && payload.messageId && payload.text) {
+      setState({
+        items: state.items.map(item =>
+          item.messageId === payload.messageId
+            ? { ...item, text: payload.text, editedAt: payload.editedAt || new Date().toISOString() }
+            : item
+        )
+      });
       return;
     }
 
@@ -276,6 +298,17 @@ export function createChatThreadStore() {
     if (event === 'typing:stop') {
       setState({
         typingUsers: state.typingUsers.filter((user) => user.userId !== payload.userId)
+      });
+      return;
+    }
+
+    if (event === 'poll:voted' && payload.messageId && payload.votes) {
+      setState({
+        items: state.items.map(item =>
+          item.messageId === payload.messageId
+            ? { ...item, poll: item.poll ? { ...item.poll, votes: payload.votes } : item.poll }
+            : item
+        )
       });
     }
   }
@@ -295,6 +328,21 @@ export function createChatThreadStore() {
 
   function setDeleteAfter(value) {
     setState({ deleteAfter: value });
+  }
+
+  async function deleteMessage(messageId) {
+    await requestDeleteMessage(messageId);
+    setState({
+      items: state.items.map((m) =>
+        m.messageId === messageId ? { ...m, deleted: true, text: '' } : m
+      )
+    });
+  }
+
+  async function clearChat() {
+    if (!state.chatId) return;
+    await requestClearChat(state.chatId);
+    setState({ items: [], nextCursor: null, hasMore: false });
   }
 
   function reset() {
@@ -329,6 +377,8 @@ export function createChatThreadStore() {
     openAdminChat,
     loadMore,
     submitMessage,
+    deleteMessage,
+    clearChat,
     openViewOnce,
     setViewOnce,
     setDeleteAfter,

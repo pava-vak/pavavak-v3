@@ -55,7 +55,8 @@ function brandPanel() {
 
 export function renderLoginView({ state, appEnv = 'development', activeThemeId = 'sandstone' }) {
   const showDevTools = appEnv !== 'production';
-  const isLoading = state.status === 'loading';
+  const loginLoading = state.loginLoading || false;
+  const registerLoading = state.registerLoading || false;
   const quickUsers = [
     { userId: 1,   username: 'admin',  password: 'admin123',  displayName: 'Admin',      isAdmin: true  },
     { userId: 2,   username: 'demo',   password: 'demo123',   displayName: 'Demo User',  isAdmin: false },
@@ -67,6 +68,7 @@ export function renderLoginView({ state, appEnv = 'development', activeThemeId =
     <div class="auth-shell">
       ${brandPanel()}
       <div class="auth-card-wrap">
+        <button class="app-refresh-btn" type="button" data-role="app-refresh" title="Check for update &amp; reload">🔄</button>
         <section class="auth-card">
           <div class="auth-copy">
             <p class="eyebrow">Welcome back</p>
@@ -91,8 +93,8 @@ export function renderLoginView({ state, appEnv = 'development', activeThemeId =
                 <button type="button" class="password-toggle" data-role="password-toggle" aria-label="Show password">Show</button>
               </span>
             </label>
-            <button class="primary-button" type="submit" ${isLoading ? 'disabled' : ''}>
-              ${isLoading ? 'Signing in...' : 'Login'}
+            <button class="primary-button" type="submit" ${loginLoading ? 'disabled' : ''}>
+              ${loginLoading ? 'Signing in...' : 'Login'}
             </button>
           </form>
 
@@ -112,8 +114,8 @@ export function renderLoginView({ state, appEnv = 'development', activeThemeId =
                 <button type="button" class="password-toggle" data-role="password-toggle" aria-label="Show password">Show</button>
               </span>
             </label>
-            <button class="primary-button" type="submit" ${isLoading ? 'disabled' : ''}>
-              ${isLoading ? 'Creating account...' : 'Create account'}
+            <button class="primary-button" type="submit" ${registerLoading ? 'disabled' : ''}>
+              ${registerLoading ? 'Creating account...' : 'Create account'}
             </button>
           </form>
 
@@ -155,6 +157,10 @@ export function bindLoginView(root, { onLogin, onRegister, onQuickLogin, onSelec
     loginTab?.classList.toggle('auth-tab-active', isLogin);
     registerTab?.classList.toggle('auth-tab-active', !isLogin);
   }
+
+  root.querySelector('[data-role="app-refresh"]')?.addEventListener('click', () => {
+    navigator.serviceWorker?.getRegistration?.().then(r => r?.update?.()).catch(() => {}).finally(() => window.location.reload());
+  });
 
   loginTab?.addEventListener('click', () => setTab('login'));
   registerTab?.addEventListener('click', () => setTab('register'));

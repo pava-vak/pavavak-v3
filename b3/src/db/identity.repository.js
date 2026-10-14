@@ -59,6 +59,18 @@ async function createUser({ username, displayName, passwordHash, isAdmin = false
   }
 }
 
+async function updateDisplayName(userId, displayName) {
+  const db = getPool();
+  const result = await db.query(
+    `update v3_users
+     set display_name = $2
+     where user_id = $1
+     returning user_id, username, display_name, is_admin, disabled, token_version`,
+    [userId, displayName]
+  );
+  return result.rowCount > 0 ? mapUser(result.rows[0]) : null;
+}
+
 async function setPasswordHash(userId, passwordHash) {
   const db = getPool();
   const result = await db.query(
@@ -161,6 +173,7 @@ module.exports = {
   getById,
   getByIdWithHash,
   createUser,
+  updateDisplayName,
   setPasswordHash,
   setDisabled,
   listUsers,

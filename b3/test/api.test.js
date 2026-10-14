@@ -255,7 +255,7 @@ test('marking a chat read clears unread count and marks incoming thread messages
 
     const readResponse = await app.inject({
       method: 'POST',
-      url: '/api/v3/chats/direct%3A%3A101/read',
+      url: '/api/v3/chats/direct%3A%3A9001%3A9201/read',
       headers,
       payload: {}
     });
@@ -264,7 +264,7 @@ test('marking a chat read clears unread count and marks incoming thread messages
     const readBody = readResponse.json();
     assert.equal(readBody.success, true);
     assert.equal(readBody.unreadCount, 0);
-    assert.deepEqual(readBody.updatedMessageIds.sort(), ['m-101-1', 'm-101-3']);
+    assert.deepEqual(readBody.updatedMessageIds.sort(), ['m-9201-a1', 'm-9201-a3']);
 
     const chatsResponse = await app.inject({
       method: 'GET',
@@ -272,12 +272,12 @@ test('marking a chat read clears unread count and marks incoming thread messages
       headers
     });
     assert.equal(chatsResponse.statusCode, 200);
-    const chat = chatsResponse.json().items.find((item) => item.chatId === 'direct::101');
+    const chat = chatsResponse.json().items.find((item) => item.chatId === 'direct::9001:9201');
     assert.equal(chat.unreadCount, 0);
 
     const threadResponse = await app.inject({
       method: 'GET',
-      url: '/api/v3/chats/direct%3A%3A101/messages',
+      url: '/api/v3/chats/direct%3A%3A9001%3A9201/messages',
       headers
     });
     assert.equal(threadResponse.statusCode, 200);
@@ -297,7 +297,7 @@ test('sending a message appends it and updates the sender chat summary', async (
       url: '/api/v3/messages',
       headers,
       payload: {
-        chatId: 'direct::101',
+        chatId: 'direct::9001:9301',
         text: 'Automated test message'
       }
     });
@@ -314,7 +314,7 @@ test('sending a message appends it and updates the sender chat summary', async (
       headers
     });
     assert.equal(chatsResponse.statusCode, 200);
-    const chat = chatsResponse.json().items.find((item) => item.chatId === 'direct::101');
+    const chat = chatsResponse.json().items.find((item) => item.chatId === 'direct::9001:9301');
     assert.equal(chat.unreadCount, 0);
     assert.equal(chat.lastMessage.messageId, message.messageId);
     assert.equal(chat.lastMessage.text, 'Automated test message');
@@ -332,7 +332,7 @@ test('message send is rate limited', async () => {
         url: '/api/v3/messages',
         headers,
         payload: {
-          chatId: 'direct::101',
+          chatId: 'direct::9001:9311',
           text: `Rate limit message ${i}`
         }
       });

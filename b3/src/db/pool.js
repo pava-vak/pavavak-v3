@@ -6,12 +6,18 @@ let pool;
 function getPool() {
   if (!pool) {
     const config = {
-      connectionString: env.DATABASE_URL
+      connectionString: env.DATABASE_URL,
+      max: 20,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 5_000,
     };
     if (env.DATABASE_URL && env.DATABASE_SSL_REJECT_UNAUTHORIZED) {
       config.ssl = { rejectUnauthorized: true };
     }
     pool = new Pool(config);
+    pool.on('connect', (client) => {
+      client.query("SET statement_timeout = '8s'").catch(() => {});
+    });
   }
   return pool;
 }

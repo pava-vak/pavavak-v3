@@ -3,7 +3,7 @@ const { z } = require('zod');
 const { env } = require('../../config/env');
 const { requireAuth } = require('../../shared/security/auth.preHandler');
 const identity = require('../../db/identityAdapter');
-const { hashPassword, verifyPassword } = require('../../shared/security/password.service');
+const { hashPassword, verifyPassword, needsRehash } = require('../../shared/security/password.service');
 const { createLoginThrottle } = require('../../shared/security/loginThrottle');
 const {
   signAccessToken,
@@ -38,10 +38,19 @@ const loginSchema = z.object({
 });
 
 const refreshSchema = z.object({
-  refreshToken: z.string().min(1)
+  refreshToken: z.string().min(1).optional() // optional — prefer HttpOnly cookie
 });
 
-async function issueSession(user) {
+const REFRESH_COOKIE = 'pava_refresh';
+const COOKIE_OPTS = {
+  httpOnly: true,
+  sameSite: 'lax',
+  path: '/api/v3/auth',
+  maxAge: 30 * 24 * 60 * 60, // 30 days in seconds
+  // secure is set dynamically — true in production, false in dev so localhost works without HTTPS
+};
+
+async function issueSession(user, reply) {
   const publicUser = identity.publicUser(user);
   const sessionUser = {
     ...publicUser,
@@ -52,11 +61,13 @@ async function issueSession(user) {
     signRefreshToken(sessionUser)
   ]);
 
+  const secure = env.APP_ENV === 'production';
+  reply.setCookie(REFRESH_COOKIE, refreshToken, { ...COOKIE_OPTS, secure });
+
   return {
     success: true,
     tokens: {
       accessToken,
-      refreshToken,
       tokenType: 'Bearer'
     },
     user: publicUser
@@ -112,8 +123,12 @@ function registerAuthRoutes(app) {
           passwordHash: await hashPassword(parsed.data.password),
           isAdmin: false
         });
-        return issueSession(user);
+        return issueSession(user, reply);
       } catch (error) {
+        const msg = error?.message || '';
+        if (msg.toLowerCase().includes('unique') || msg.toLowerCase().includes('duplicate') || msg.toLowerCase().includes('already')) {
+          return reply.status(409).send({ success: false, error: 'Username already taken' });
+        }
         return sendCaughtError(request, reply, error, 'Failed to register');
       }
     });
@@ -149,7 +164,13 @@ function registerAuthRoutes(app) {
       }
 
       loginThrottle.reset(throttleKeys);
-      return issueSession(user);
+
+      // Transparently re-hash PBKDF2 passwords to Argon2id on successful login
+      if (needsRehash(user.passwordHash)) {
+        identity.setPasswordHash(user.userId, await hashPassword(parsed.data.password)).catch(() => {});
+      }
+
+      return issueSession(user, reply);
     });
 
     fastify.post('/api/v3/auth/dev-login', async (request, reply) => {
@@ -176,27 +197,36 @@ function registerAuthRoutes(app) {
       }
 
       const user = await identity.ensureUser(parsed.data);
-      return issueSession(user);
+      return issueSession(user, reply);
     });
 
     fastify.post('/api/v3/auth/refresh', async (request, reply) => {
+      // Cookie takes precedence; body token is accepted for backward compat with older clients
+      const tokenFromCookie = request.cookies?.[REFRESH_COOKIE];
       const parsed = refreshSchema.safeParse(request.body || {});
-      if (!parsed.success) {
-        return reply.status(400).send({
-          success: false,
-          error: 'Invalid request body',
-          details: parsed.error.flatten()
-        });
+      const tokenFromBody = parsed.success ? parsed.data.refreshToken : undefined;
+      const token = tokenFromCookie || tokenFromBody;
+
+      if (!token) {
+        return reply.status(401).send({ success: false, error: 'No refresh token' });
       }
 
       try {
-        const claims = await verifyRefreshToken(parsed.data.refreshToken);
+        const claims = await verifyRefreshToken(token);
         const user = await identity.getById(Number(claims.sub));
         if (!user || user.disabled || Number(claims.tv || 0) !== Number(user.tokenVersion || 0)) {
           throw new Error('Invalid refresh token');
         }
-        return issueSession(user);
-      } catch {
+        return issueSession(user, reply);
+      } catch (error) {
+        // JWT library errors have specific names; our manual throw has the exact message.
+        // Anything else (DB connectivity, pool errors) should return 503 so the client retries.
+        const jwtErrorNames = ['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError', 'JWTError'];
+        const isTokenError = jwtErrorNames.includes(error?.name) || (error?.message === 'Invalid refresh token');
+        if (!isTokenError) {
+          request.log.error({ err: error }, 'Service error during token refresh');
+          return reply.status(503).send({ success: false, error: 'Service temporarily unavailable' });
+        }
         return reply.status(401).send({
           success: false,
           error: 'Invalid refresh token'
@@ -207,6 +237,7 @@ function registerAuthRoutes(app) {
     fastify.post('/api/v3/auth/logout', { preHandler: requireAuth }, async (request, reply) => {
       try {
         await identity.incrementTokenVersion(request.auth.userId);
+        reply.clearCookie(REFRESH_COOKIE, { path: '/api/v3/auth' });
         return { success: true };
       } catch (error) {
         return sendCaughtError(request, reply, error, 'Failed to logout');
@@ -218,6 +249,18 @@ function registerAuthRoutes(app) {
     success: true,
     user: request.auth
   }));
+
+  app.put('/api/v3/users/me', { preHandler: requireAuth }, async (request, reply) => {
+    const parsed = z.object({
+      displayName: z.string().trim().min(1).max(80)
+    }).safeParse(request.body || {});
+    if (!parsed.success) {
+      return reply.status(400).send({ success: false, error: 'Display name must be 1–80 characters' });
+    }
+    const user = await identity.updateDisplayName(request.auth.userId, parsed.data.displayName);
+    if (!user) return reply.status(404).send({ success: false, error: 'User not found' });
+    return { success: true, user };
+  });
 
   app.put('/api/v3/auth/change-password', { preHandler: requireAuth }, async (request, reply) => {
     const parsed = changePasswordSchema.safeParse(request.body || {});

@@ -69,6 +69,24 @@ function emitMessageRead(userId, payload) {
   emitToUser(userId, 'message:read', payload);
 }
 
+function emitMessageDeletedToMembers(chatId, messageId, memberIds) {
+  for (const memberId of memberIds) {
+    emitToUser(memberId, 'message:deleted', { chatId, messageId });
+  }
+}
+
+function emitMessageEditedToMembers(chatId, messageId, text, editedAt, memberIds) {
+  for (const memberId of memberIds) {
+    emitToUser(memberId, 'message:edited', { chatId, messageId, text, editedAt });
+  }
+}
+
+function emitReactionToMembers(chatId, messageId, userId, displayName, emoji, memberIds) {
+  for (const memberId of memberIds) {
+    emitToUser(memberId, 'message:reaction', { chatId, messageId, userId, displayName, emoji });
+  }
+}
+
 module.exports = {
   setIo,
   emitToUser,
@@ -80,5 +98,8 @@ module.exports = {
   emitChatUpdatedToMembers,
   emitMessageDelivered,
   emitMessageRead,
+  emitMessageDeletedToMembers,
+  emitMessageEditedToMembers,
+  emitReactionToMembers,
   messageForMember
 };

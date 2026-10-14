@@ -143,6 +143,7 @@ function mapSummaryRow(row) {
     avatarText: row.avatar_text || '?',
     unreadCount: row.unread_count,
     muted: row.muted,
+    peerId: row.peer_user_id || null,
     lastMessage: row.last_message_id
       ? {
           messageId: row.last_message_id,
@@ -158,48 +159,43 @@ function mapSummaryRow(row) {
 async function listChatsForUser(user) {
   await ensureSeededForUser(user);
   const db = getPool();
+  // Single LATERAL JOIN fetches the peer user once per direct conversation,
+  // eliminating the 3 correlated subqueries the old query ran per row.
   const result = await db.query(
     `select
       s.conversation_id,
       c.type,
-      -- for direct chats show the OTHER person's name, not the stored title
       case
-        when c.type = 'direct' then
-          coalesce(
-            (select coalesce(u.display_name, u.username)
-             from v3_conversation_members cm
-             join v3_users u on u.user_id = cm.user_id
-             where cm.conversation_id = c.conversation_id
-               and cm.user_id != $1
-             limit 1),
-            c.title
-          )
+        when c.type = 'direct' then coalesce(peer.name, c.title)
         else c.title
       end as title,
       '' as subtitle,
-      left(coalesce(
-        case when c.type = 'direct' then
-          (select coalesce(u.display_name, u.username)
-           from v3_conversation_members cm
-           join v3_users u on u.user_id = cm.user_id
-           where cm.conversation_id = c.conversation_id
-             and cm.user_id != $1
-           limit 1)
-        else c.title end,
-        '?'
-      ), 1) as avatar_text,
+      left(case
+        when c.type = 'direct' then coalesce(peer.name, '?')
+        else coalesce(c.title, '?')
+      end, 1) as avatar_text,
       s.unread_count,
       m.muted,
       s.last_message_id,
       s.last_message_preview,
       s.last_message_at,
       s.last_message_direction,
-      s.last_message_status
-     from v3_user_chat_summaries s
-     join v3_conversations c on c.conversation_id = s.conversation_id
-     join v3_conversation_members m on m.conversation_id = s.conversation_id and m.user_id = s.user_id
-     where s.user_id = $1
-     order by coalesce(s.last_message_at, s.updated_at) desc, s.updated_at desc`,
+      s.last_message_status,
+      case when c.type = 'direct' then peer.user_id else null end as peer_user_id
+    from v3_user_chat_summaries s
+    join v3_conversations c on c.conversation_id = s.conversation_id
+    join v3_conversation_members m on m.conversation_id = s.conversation_id and m.user_id = s.user_id
+    left join lateral (
+      select cm.user_id, coalesce(u.display_name, u.username) as name
+      from v3_conversation_members cm
+      join v3_users u on u.user_id = cm.user_id
+      where cm.conversation_id = c.conversation_id
+        and cm.user_id != $1
+        and c.type = 'direct'
+      limit 1
+    ) peer on true
+    where s.user_id = $1
+    order by coalesce(s.last_message_at, s.updated_at) desc, s.updated_at desc`,
     [user.userId]
   );
   return result.rows.map(mapSummaryRow);
@@ -244,36 +240,25 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
          end as sender_display_name,
          msg.view_once,
          msg.expires_at,
+         msg.deleted_at,
          r.view_once_opened_at,
          case
+           when msg.deleted_at is not null then ''
            when msg.view_once and msg.sender_id = $1 then ''
            when msg.view_once and msg.sender_id != $1 and r.view_once_opened_at is not null then ''
            else msg.body
          end as text,
+         p.question as poll_question,
+         p.options as poll_options,
+         (select option_index from v3_poll_votes where message_id = msg.message_id and user_id = $1 limit 1) as poll_my_vote,
+         (select json_object_agg(option_index::text, cnt) from (select option_index, count(*) as cnt from v3_poll_votes where message_id = msg.message_id group by option_index) t) as poll_votes,
          msg.created_at as sent_at,
          case
            when msg.sender_id = $1 then
              case
-               when not exists (
-                 select 1
-                 from v3_message_receipts peer
-                 where peer.message_id = msg.message_id
-                   and peer.user_id != msg.sender_id
-               ) then 'sent'
-               when not exists (
-                 select 1
-                 from v3_message_receipts peer
-                 where peer.message_id = msg.message_id
-                   and peer.user_id != msg.sender_id
-                   and peer.read_at is null
-               ) then 'read'
-               when not exists (
-                 select 1
-                 from v3_message_receipts peer
-                 where peer.message_id = msg.message_id
-                   and peer.user_id != msg.sender_id
-                   and peer.delivered_at is null
-               ) then 'delivered'
+               when peer_agg.peer_count = 0 then 'sent'
+               when peer_agg.read_count >= peer_agg.peer_count then 'read'
+               when peer_agg.delivered_count >= peer_agg.peer_count then 'delivered'
                else 'sent'
              end
            when r.read_at is not null then 'read'
@@ -283,6 +268,15 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
        from v3_messages msg
        join v3_message_receipts r on r.message_id = msg.message_id and r.user_id = $1
        left join v3_users sender on sender.user_id = msg.sender_id
+       left join v3_polls p on p.message_id = msg.message_id
+       left join lateral (
+         select
+           count(*) filter (where peer.user_id != msg.sender_id) as peer_count,
+           count(*) filter (where peer.user_id != msg.sender_id and peer.read_at is not null) as read_count,
+           count(*) filter (where peer.user_id != msg.sender_id and peer.delivered_at is not null) as delivered_count
+         from v3_message_receipts peer
+         where peer.message_id = msg.message_id
+       ) peer_agg on true
        where msg.conversation_id = $2
          and (msg.expires_at is null or msg.expires_at > now())
          ${cursorClause}
@@ -305,7 +299,14 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
     status: row.status,
     viewOnce: Boolean(row.view_once),
     viewOnceOpened: Boolean(row.view_once_opened_at),
-    expiresAt: row.expires_at?.toISOString?.() || row.expires_at || null
+    expiresAt: row.expires_at?.toISOString?.() || row.expires_at || null,
+    deleted: Boolean(row.deleted_at),
+    poll: row.poll_question ? {
+      question: row.poll_question,
+      options: Array.isArray(row.poll_options) ? row.poll_options : JSON.parse(row.poll_options || '[]'),
+      votes: row.poll_votes || {},
+      myVote: row.poll_my_vote != null ? Number(row.poll_my_vote) : null
+    } : undefined
   }));
 
   return {
@@ -348,6 +349,10 @@ async function appendOutgoingMessage(user, chatId, text, messageId = null, { vie
   );
   const memberIds = membersResult.rows.map((row) => Number(row.user_id));
 
+  // Extract file_id from media messages for indexed auth lookups
+  const mediaMatch = /^__(IMG|VID|AUD|DOC)__:(.+)$/.exec(text);
+  const mediaFileId = mediaMatch ? mediaMatch[2] : null;
+
   const client = await db.connect();
   try {
     await client.query('begin');
@@ -356,6 +361,15 @@ async function appendOutgoingMessage(user, chatId, text, messageId = null, { vie
        values ($1, $2, $3, $4, $5, $6::timestamptz, $7::timestamptz)`,
       [resolvedMessageId, chatId, user.userId, text, Boolean(viewOnce), expiresAt, sentAt]
     );
+
+    if (mediaFileId) {
+      await client.query(
+        `insert into v3_message_media (file_id, message_id, conversation_id, uploaded_by)
+         values ($1, $2, $3, $4::bigint)
+         on conflict (file_id) do nothing`,
+        [mediaFileId, resolvedMessageId, chatId, user.userId]
+      );
+    }
 
     for (const memberId of memberIds) {
       await client.query(
@@ -578,12 +592,29 @@ async function markChatRead(user, chatId) {
       [user.userId, chatId]
     );
 
+    // Clear reader's unread count
     await client.query(
       `update v3_user_chat_summaries
        set unread_count = 0, updated_at = now()
        where user_id = $1 and conversation_id = $2`,
       [user.userId, chatId]
     );
+
+    // Update each sender's summary to 'read' so offline senders see correct tick on next load
+    if (updated.rows.length > 0) {
+      const senderIds = [...new Set(updated.rows.map(r => Number(r.sender_id)))];
+      const messageIds = updated.rows.map(r => r.message_id);
+      await client.query(
+        `update v3_user_chat_summaries
+         set last_message_status = 'read', updated_at = now()
+         where conversation_id = $1
+           and user_id = any($2)
+           and last_message_id = any($3)
+           and last_message_status in ('sent', 'delivered')`,
+        [chatId, senderIds, messageIds]
+      );
+    }
+
     await client.query('commit');
 
     const summary = await db.query(
@@ -627,12 +658,14 @@ async function listAllChats() {
          'userId', m.user_id,
          'username', coalesce(u.username, m.user_id::text),
          'displayName', coalesce(u.display_name, u.username, m.user_id::text)
-       ) order by m.user_id) as participants
+       ) order by m.user_id) as participants,
+       (select msg.body from v3_messages msg where msg.conversation_id = c.conversation_id order by msg.created_at desc limit 1) as last_body,
+       (select msg.created_at from v3_messages msg where msg.conversation_id = c.conversation_id order by msg.created_at desc limit 1) as last_sent_at
      from v3_conversations c
      join v3_conversation_members m on m.conversation_id = c.conversation_id
      left join v3_users u on u.user_id = m.user_id
      group by c.conversation_id, c.type, c.title
-     order by c.conversation_id`
+     order by last_sent_at desc nulls last`
   );
   return result.rows.map((row) => ({
     chatId: row.conversation_id,
@@ -642,7 +675,9 @@ async function listAllChats() {
       userId: Number(p.userId),
       username: p.username,
       displayName: p.displayName
-    }))
+    })),
+    lastMessage: row.last_body ? { text: row.last_body } : null,
+    lastSentAt: row.last_sent_at?.toISOString?.() || null
   }));
 }
 
@@ -671,6 +706,7 @@ async function adminListMessagesForChat(chatId, cursor = null, limit = 50) {
          msg.sender_id,
          coalesce(u.display_name, u.username, msg.sender_id::text) as sender_display_name,
          msg.body as text,
+         msg.deleted_at,
          msg.created_at as sent_at
        from v3_messages msg
        left join v3_users u on u.user_id = msg.sender_id
@@ -684,7 +720,7 @@ async function adminListMessagesForChat(chatId, cursor = null, limit = 50) {
 
   const rows = result.rows;
   const hasMore = rows.length > safeLimit;
-  const visibleRows = hasMore ? rows.slice(1) : rows;
+  const visibleRows = hasMore ? rows.slice(0, safeLimit) : rows;
   const items = visibleRows.map((row) => ({
     messageId: row.message_id,
     senderId: Number(row.sender_id),
@@ -692,7 +728,8 @@ async function adminListMessagesForChat(chatId, cursor = null, limit = 50) {
     direction: 'incoming',
     text: row.text,
     sentAt: row.sent_at?.toISOString?.() || row.sent_at,
-    status: 'sent'
+    status: 'sent',
+    deletedAt: row.deleted_at?.toISOString?.() || row.deleted_at || null
   }));
 
   return {
@@ -730,6 +767,144 @@ async function getConversationMemberUserIds(chatId) {
   return result.rows.map((row) => Number(row.user_id));
 }
 
+async function deleteConversation(user, chatId) {
+  const db = getPool();
+  const access = await db.query(
+    'select 1 from v3_conversation_members where conversation_id = $1 and user_id = $2 limit 1',
+    [chatId, user.userId]
+  );
+  if (access.rowCount === 0) {
+    throw Object.assign(new Error('Access denied'), { status: 403 });
+  }
+  const client = await db.connect();
+  try {
+    await client.query('begin');
+    await client.query(
+      'delete from v3_message_receipts where message_id in (select message_id from v3_messages where conversation_id = $1)',
+      [chatId]
+    );
+    await client.query('delete from v3_messages where conversation_id = $1', [chatId]);
+    await client.query('delete from v3_user_chat_summaries where conversation_id = $1', [chatId]);
+    await client.query('delete from v3_conversation_members where conversation_id = $1', [chatId]);
+    await client.query('delete from v3_conversations where conversation_id = $1', [chatId]);
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function clearChatMessages(user, chatId) {
+  const db = getPool();
+  const access = await db.query(
+    'select 1 from v3_conversation_members where conversation_id = $1 and user_id = $2 limit 1',
+    [chatId, user.userId]
+  );
+  if (access.rowCount === 0) {
+    throw Object.assign(new Error('Access denied'), { status: 403 });
+  }
+  const client = await db.connect();
+  try {
+    await client.query('begin');
+    await client.query(
+      'delete from v3_message_receipts where message_id in (select message_id from v3_messages where conversation_id = $1)',
+      [chatId]
+    );
+    await client.query('delete from v3_messages where conversation_id = $1', [chatId]);
+    await client.query(
+      `update v3_user_chat_summaries
+       set last_message_preview = null, last_message_at = null, unread_count = 0, updated_at = now()
+       where conversation_id = $1`,
+      [chatId]
+    );
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function deleteMessage(user, messageId) {
+  const db = getPool();
+  // Admins can delete any message; regular users can only delete their own
+  const whereClause = user.isAdmin
+    ? 'message_id = $1'
+    : 'message_id = $1 and sender_id = $2';
+  const params = user.isAdmin ? [messageId] : [messageId, user.userId];
+  const result = await db.query(
+    `update v3_messages set deleted_at = now() where ${whereClause} and deleted_at is null returning message_id, conversation_id`,
+    params
+  );
+  if (result.rowCount === 0) {
+    throw Object.assign(new Error('Message not found or permission denied'), { status: 404 });
+  }
+  const { conversation_id: conversationId } = result.rows[0];
+  const memberResult = await db.query(
+    'select user_id from v3_conversation_members where conversation_id = $1',
+    [conversationId]
+  );
+  return {
+    messageId,
+    conversationId,
+    memberIds: memberResult.rows.map((r) => Number(r.user_id))
+  };
+}
+
+async function broadcastSystemUpdate(adminUserId) {
+  const db = getPool();
+  const convResult = await db.query(
+    `select cm.conversation_id, array_agg(cm.user_id::bigint) as member_ids
+     from v3_conversation_members cm
+     group by cm.conversation_id`
+  );
+
+  const now = new Date().toISOString();
+  const results = [];
+
+  for (const row of convResult.rows) {
+    const messageId = `m-${crypto.randomUUID()}`;
+    const conversationId = row.conversation_id;
+    const memberIds = row.member_ids.map(Number);
+
+    await db.query(
+      `insert into v3_messages (message_id, conversation_id, sender_id, body, created_at)
+       values ($1, $2, $3, $4, $5::timestamptz)`,
+      [messageId, conversationId, adminUserId, '__SYS_UPDATE__', now]
+    );
+
+    for (const memberId of memberIds) {
+      await db.query(
+        `insert into v3_message_receipts (message_id, user_id, delivered_at)
+         values ($1, $2, now())
+         on conflict (message_id, user_id) do nothing`,
+        [messageId, memberId]
+      );
+      await db.query(
+        `insert into v3_user_chat_summaries
+           (user_id, conversation_id, unread_count, last_message_id, last_message_preview,
+            last_message_at, last_message_direction, last_message_status, updated_at)
+         values ($1, $2, 1, $3, $4, $5::timestamptz, 'incoming', 'sent', $5::timestamptz)
+         on conflict (user_id, conversation_id) do update set
+           last_message_id = excluded.last_message_id,
+           last_message_preview = excluded.last_message_preview,
+           last_message_at = excluded.last_message_at,
+           last_message_direction = excluded.last_message_direction,
+           last_message_status = excluded.last_message_status,
+           updated_at = excluded.updated_at`,
+        [memberId, conversationId, messageId, '🔄 App update available', now]
+      );
+    }
+
+    results.push({ conversationId, messageId, memberIds });
+  }
+
+  return results;
+}
+
 module.exports = {
   ensureSeededForUser,
   listChatsForUser,
@@ -743,5 +918,9 @@ module.exports = {
   getConversationMemberUserIds,
   createDirectConversation,
   listAllChats,
-  adminListMessagesForChat
+  adminListMessagesForChat,
+  clearChatMessages,
+  deleteMessage,
+  deleteConversation,
+  broadcastSystemUpdate
 };

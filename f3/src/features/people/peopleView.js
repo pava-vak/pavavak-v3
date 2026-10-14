@@ -16,14 +16,16 @@ export function renderPeopleView(state) {
   return `
     <section class="people-panel">
       <div class="sidebar-section-label">People</div>
-      <form class="people-search" data-role="people-search">
-        <input name="query" type="search" placeholder="Search people…" autocomplete="off" value="${escapeHtml(state.query || '')}" />
-        <button type="submit">Go</button>
-      </form>
-      ${state.error ? `<p style="padding: 4px 16px; margin: 0; font-size: 12px; color: var(--v3-danger);">${escapeHtml(state.error)}</p>` : ''}
+      <div class="people-search-wrap">
+        <input class="people-search-input" data-role="people-search-input" type="search"
+               placeholder="Search people…" autocomplete="off"
+               value="${escapeHtml(state.query || '')}" />
+      </div>
+      ${state.error ? `<p class="people-status people-status--error">${escapeHtml(state.error)}</p>` : ''}
       <div class="people-list">
-        ${state.status === 'loading' ? '<p style="padding: 8px 16px; margin: 0; font-size: 13px; color: var(--v3-muted);">Searching…</p>' : ''}
-        ${state.status !== 'loading' && !state.items.length ? '<p style="padding: 8px 16px; margin: 0; font-size: 13px; color: var(--v3-muted);">No people found.</p>' : ''}
+        ${state.status === 'loading' ? '<p class="people-status">Searching…</p>' : ''}
+        ${state.status === 'idle' && !state.items.length ? '<p class="people-status">Type a name to search.</p>' : ''}
+        ${state.status === 'ready' && !state.items.length ? '<p class="people-status">No people found.</p>' : ''}
         ${state.items.map(renderPerson).join('')}
       </div>
     </section>
@@ -31,12 +33,24 @@ export function renderPeopleView(state) {
 }
 
 export function bindPeopleView(root, { onSearch, onStartChat }) {
-  const form = root.querySelector('[data-role="people-search"]');
-  form?.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const formData = new FormData(form);
-    onSearch(String(formData.get('query') || ''));
-  });
+  const input = root.querySelector('[data-role="people-search-input"]');
+  if (input) {
+    let debounceTimer = null;
+    input.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      const q = input.value.trim();
+      if (!q) { onSearch(''); return; }
+      debounceTimer = setTimeout(() => onSearch(q), 300);
+    });
+    // Still support Enter for instant search
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        clearTimeout(debounceTimer);
+        onSearch(input.value.trim());
+      }
+    });
+  }
 
   root.querySelectorAll('[data-user-id]').forEach((button) => {
     button.addEventListener('click', () => onStartChat(Number(button.dataset.userId)));

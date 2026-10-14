@@ -7,16 +7,24 @@
 const STORAGE_KEY = 'pavav3.theme';
 
 export const THEMES = [
-  { id: 'sandstone', label: 'Sandstone', swatch: '#2f6f4f', scheme: 'light' },
-  { id: 'midnight', label: 'Midnight', swatch: '#3ddc97', scheme: 'dark' },
-  { id: 'emerald', label: 'Emerald', swatch: '#0f9d58', scheme: 'light' },
-  { id: 'royal', label: 'Royal', swatch: '#5b6cff', scheme: 'light' },
-  { id: 'saffron', label: 'Saffron', swatch: '#e2761b', scheme: 'light' },
-  { id: 'marigold', label: 'Marigold', swatch: '#f0a500', scheme: 'light' },
-  { id: 'linen', label: 'Linen', swatch: '#b08968', scheme: 'light' }
+  // Dark themes (Obsidian Whisper)
+  { id: 'midnight',    label: 'Midnight',    swatch: '#38bdf8', scheme: 'dark' },
+  { id: 'emerald',     label: 'Emerald',     swatch: '#10b981', scheme: 'dark' },
+  { id: 'sandstone',   label: 'Sandstone',   swatch: '#d4a373', scheme: 'dark' },
+  { id: 'royal',       label: 'Royal',       swatch: '#818cf8', scheme: 'dark' },
+  { id: 'saffron',     label: 'Saffron',     swatch: '#f59e0b', scheme: 'dark' },
+  { id: 'marigold',    label: 'Marigold',    swatch: '#fb923c', scheme: 'dark' },
+  { id: 'linen',       label: 'Linen',       swatch: '#e2e8f0', scheme: 'dark' },
+  // Light themes (Linen Pure & Warm Light)
+  { id: 'linen-lt',    label: 'Linen',       swatch: '#1f4e5b', scheme: 'light' },
+  { id: 'emerald-lt',  label: 'Emerald',     swatch: '#2c694e', scheme: 'light' },
+  { id: 'sandstone-lt',label: 'Sandstone',   swatch: '#c2824c', scheme: 'light' },
+  { id: 'royal-lt',    label: 'Royal',       swatch: '#4f46e5', scheme: 'light' },
+  { id: 'saffron-lt',  label: 'Saffron',     swatch: '#d97706', scheme: 'light' },
+  { id: 'marigold-lt', label: 'Marigold',    swatch: '#ea580c', scheme: 'light' },
 ];
 
-const DEFAULT_THEME = THEMES[0].id;
+const DEFAULT_THEME = THEMES[0].id; // midnight
 
 function isKnown(id) {
   return THEMES.some((theme) => theme.id === id);

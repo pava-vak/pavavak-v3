@@ -8,6 +8,7 @@ let listeners = new Set();
 let activeChatId = '';
 let connectListeners = new Set();
 let refreshOnAuthError = false;
+let authRefreshAttempts = 0;
 
 function notify(event, payload) {
   for (const listener of listeners) {
@@ -40,7 +41,7 @@ export function connectSocket() {
 
   socket = io(socketBaseUrl(), {
     path: '/socket.io',
-    transports: ['websocket', 'polling'],
+    transports: ['websocket'],
     auth: { token: accessToken },
     reconnection: true,
     reconnectionAttempts: Infinity,
@@ -48,6 +49,7 @@ export function connectSocket() {
   });
 
   socket.on('connect', () => {
+    authRefreshAttempts = 0;
     rejoinActiveChat();
     for (const listener of connectListeners) {
       listener();
@@ -56,10 +58,13 @@ export function connectSocket() {
 
   socket.on('connect_error', async () => {
     if (refreshOnAuthError) return;
-    const { refreshToken } = readTokens();
-    if (!refreshToken) return;
+    if (authRefreshAttempts >= 2) return;
+    const { accessToken } = readTokens();
+    if (!accessToken) return; // not logged in — don't try to refresh
     refreshOnAuthError = true;
+    authRefreshAttempts += 1;
     try {
+      // Refresh token is in the HttpOnly cookie — just call refresh
       await refreshSession();
       socket.auth = { token: readTokens().accessToken };
       socket.connect();
@@ -72,18 +77,22 @@ export function connectSocket() {
 
   const relay = (event) => {
     socket.on(event, (payload) => {
-      if (event === 'message:delivered' || event === 'message:read') {
-        console.log('[socket TICK]', event, payload);
-      }
       notify(event, payload);
     });
   };
 
   [
     'message:new',
+    'message:deleted',
+    'message:edited',
+    'chat:new',
     'chat:updated',
+    'chat:removed',
     'message:delivered',
     'message:read',
+    'message:reaction',
+    'chat:pinned',
+    'poll:voted',
     'typing:start',
     'typing:stop',
     'presence:online',

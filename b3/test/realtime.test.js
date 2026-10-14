@@ -116,19 +116,19 @@ test('two users exchange realtime message and sender receives delivered/read sta
 
   try {
     const alice = await login(server.app, 9401, 'alice-9401', 'Alice');
-    const bob = await login(server.app, 101, 'bob-101', 'Bob');
+    const bob = await login(server.app, 9001, 'bob-9001', 'Bob');
     const aliceSocket = connectSocket(server.baseUrl, alice.tokens.accessToken);
     const bobSocket = connectSocket(server.baseUrl, bob.tokens.accessToken);
     sockets.push(aliceSocket, bobSocket);
 
     await Promise.all([waitForConnect(aliceSocket), waitForConnect(bobSocket)]);
-    aliceSocket.emit('chat:join', { chatId: 'direct::101' });
-    bobSocket.emit('chat:join', { chatId: 'direct::101' });
+    aliceSocket.emit('chat:join', { chatId: 'direct::9001:9401' });
+    bobSocket.emit('chat:join', { chatId: 'direct::9001:9401' });
 
     const bobMessagePromise = waitFor(
       bobSocket,
       'message:new',
-      (payload) => payload.chatId === 'direct::101' && payload.message?.text === 'Realtime hello'
+      (payload) => payload.chatId === 'direct::9001:9401' && payload.message?.text === 'Realtime hello'
     );
 
     const sendResponse = await server.app.inject({
@@ -138,7 +138,7 @@ test('two users exchange realtime message and sender receives delivered/read sta
         authorization: `Bearer ${alice.tokens.accessToken}`
       },
       payload: {
-        chatId: 'direct::101',
+        chatId: 'direct::9001:9401',
         text: 'Realtime hello'
       }
     });
@@ -162,7 +162,7 @@ test('two users exchange realtime message and sender receives delivered/read sta
         authorization: `Bearer ${bob.tokens.accessToken}`
       },
       payload: {
-        chatId: 'direct::101'
+        chatId: 'direct::9001:9401'
       }
     });
     assert.equal(deliveredResponse.statusCode, 200);
@@ -180,7 +180,7 @@ test('two users exchange realtime message and sender receives delivered/read sta
         authorization: `Bearer ${bob.tokens.accessToken}`
       },
       payload: {
-        chatId: 'direct::101'
+        chatId: 'direct::9001:9401'
       }
     });
     assert.equal(readResponse.statusCode, 200);

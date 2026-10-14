@@ -160,6 +160,30 @@ async function adminListMessagesForChat(chatId, cursor = null, limit = 50) {
   return { items: [], nextCursor: null, hasMore: false };
 }
 
+async function deleteConversation(user, chatId) {
+  assertStorageConfigured();
+  return getStore().deleteConversation(user, chatId);
+}
+
+async function clearChatMessages(user, chatId) {
+  assertStorageConfigured();
+  return getStore().clearChatMessages(user, chatId);
+}
+
+async function deleteMessage(user, messageId) {
+  assertStorageConfigured();
+  return getStore().deleteMessage(user, messageId);
+}
+
+async function broadcastSystemUpdate(adminUserId) {
+  assertStorageConfigured();
+  const store = getStore();
+  if (store.broadcastSystemUpdate) {
+    return store.broadcastSystemUpdate(adminUserId);
+  }
+  return [];
+}
+
 module.exports = {
   listChatsForUser,
   listMessagesForChat,
@@ -173,5 +197,9 @@ module.exports = {
   getConversationMemberUserIds,
   createDirectConversation,
   listAllChats,
-  adminListMessagesForChat
+  adminListMessagesForChat,
+  clearChatMessages,
+  deleteMessage,
+  deleteConversation,
+  broadcastSystemUpdate
 };

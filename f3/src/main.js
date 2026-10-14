@@ -25,5 +25,19 @@ if ('serviceWorker' in navigator) {
         window.dispatchEvent(new CustomEvent('pava:open-chat', { detail: { chatId: event.data.chatId } }));
       }
     });
+
+    // Auto-reload when a new SW takes control (update deployed)
+    // Only fires on updates — first install has no previous controller
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      reloading = true;
+      const toast = document.createElement('div');
+      toast.textContent = '⬆ Updating app…';
+      toast.className = 'pava-toast pava-toast--success';
+      document.body.appendChild(toast);
+      setTimeout(() => window.location.reload(), 900);
+    });
   });
 }

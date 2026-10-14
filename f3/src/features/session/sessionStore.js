@@ -1,4 +1,4 @@
-import { devLogin, fetchMe, getCachedUser, login, logout, refreshSession, register, setUnauthorizedHandler } from '../../shared/apiClient.js';
+import { devLogin, fetchMe, getCachedUser, login, logout, refreshSession, register, setUnauthorizedHandler, updateProfile } from '../../shared/apiClient.js';
 import { disconnectSocket, connectSocket } from '../../shared/socketClient.js';
 import { readTokens } from '../../shared/tokenStore.js';
 
@@ -8,7 +8,9 @@ export function createSessionStore() {
     status: hasToken ? 'loading' : 'idle',
     user: getCachedUser(),
     error: '',
-    tokensPresent: hasToken
+    tokensPresent: hasToken,
+    loginLoading: false,
+    registerLoading: false
   };
 
   const listeners = new Set();
@@ -116,10 +118,7 @@ export function createSessionStore() {
   }
 
   async function loginWithPassword(input) {
-    setState({
-      status: 'loading',
-      error: ''
-    });
+    setState({ loginLoading: true, error: '' });
 
     try {
       const result = await login(input);
@@ -128,23 +127,22 @@ export function createSessionStore() {
         status: 'authenticated',
         user: result.user,
         error: '',
-        tokensPresent: true
+        tokensPresent: true,
+        loginLoading: false
       });
     } catch (error) {
       setState({
         status: 'signed_out',
         user: null,
         error: error.message || 'Login failed',
-        tokensPresent: false
+        tokensPresent: false,
+        loginLoading: false
       });
     }
   }
 
   async function registerAccount(input) {
-    setState({
-      status: 'loading',
-      error: ''
-    });
+    setState({ registerLoading: true, error: '' });
 
     try {
       const result = await register(input);
@@ -153,20 +151,28 @@ export function createSessionStore() {
         status: 'authenticated',
         user: result.user,
         error: '',
-        tokensPresent: true
+        tokensPresent: true,
+        registerLoading: false
       });
     } catch (error) {
       setState({
         status: 'signed_out',
         user: null,
         error: error.message || 'Registration failed',
-        tokensPresent: false
+        tokensPresent: false,
+        registerLoading: false
       });
     }
   }
 
-  function signOut() {
-    logout();
+  async function updateDisplayName(displayName) {
+    const result = await updateProfile({ displayName });
+    setState({ user: { ...state.user, displayName: result.user.displayName } });
+    return result.user;
+  }
+
+  async function signOut() {
+    await logout();
     disconnectSocket();
     setState({
       status: 'signed_out',
@@ -189,6 +195,7 @@ export function createSessionStore() {
     loginWithPassword,
     registerAccount,
     loginAsDev,
-    signOut
+    signOut,
+    updateDisplayName
   };
 }

@@ -92,6 +92,16 @@ async function cleanSeedData() {
   return store().cleanSeedData();
 }
 
+async function updateDisplayName(userId, displayName) {
+  if (!store().updateDisplayName) {
+    const err = new Error('Not supported in this storage mode');
+    err.status = 501;
+    throw err;
+  }
+  const user = await store().updateDisplayName(userId, displayName);
+  return user ? publicUser(user) : null;
+}
+
 module.exports = {
   findByUsername,
   getById,
@@ -105,5 +115,6 @@ module.exports = {
   ensureUser,
   incrementTokenVersion,
   cleanSeedData,
+  updateDisplayName,
   publicUser
 };

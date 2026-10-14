@@ -140,7 +140,8 @@ function renderUsersTab(state) {
                   </td>
                   <td class="ap-td-actions">
                     <button class="ap-action-btn" data-role="reset-password"
-                      data-user-id="${escapeHtml(String(u.userId))}">
+                      data-user-id="${escapeHtml(String(u.userId))}"
+                      data-user-name="${escapeHtml(u.displayName || u.username)}">
                       Reset PW
                     </button>
                     ${!u.isAdmin ? `
@@ -353,7 +354,12 @@ export function renderAdminPanel(root) {
       if (store.getState().activeTab === 'monitor') store.loadChats();
     });
     root.querySelectorAll('[data-role="reset-password"]').forEach((btn) => {
-      btn.addEventListener('click', () => store.resetPassword(Number(btn.dataset.userId)));
+      btn.addEventListener('click', () => {
+        const userName = btn.dataset.userName || `User #${btn.dataset.userId}`;
+        if (confirm(`Reset password for ${userName}?\n\nA random temporary password will be generated and shown once. You cannot undo this.`)) {
+          store.resetPassword(Number(btn.dataset.userId));
+        }
+      });
     });
     root.querySelectorAll('[data-role="toggle-disabled"]').forEach((btn) => {
       btn.addEventListener('click', () => {

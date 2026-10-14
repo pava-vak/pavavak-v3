@@ -7,6 +7,7 @@ const {
   isUserOnline
 } = require('./connectionRegistry');
 const chatAdapter = require('../db/chatAdapter');
+const { getPool } = require('../db/pool');
 
 const typingTimers = new Map();
 
@@ -52,10 +53,14 @@ function attachSocketServer(httpServer) {
     addConnection(user.userId, socket.id);
     socket.join(userRoom);
 
+    // Cache the set of chat IDs this socket is allowed in — used for O(1) typing auth
+    socket.data.chatIdSet = new Set();
+
     try {
       const chatIds = await chatAdapter.listChatIdsForUser(user);
       for (const chatId of chatIds) {
         socket.join(`chat:${chatId}`);
+        socket.data.chatIdSet.add(chatId);
       }
 
       for (const chatId of chatIds) {
@@ -68,6 +73,7 @@ function attachSocketServer(httpServer) {
       }
     } catch (error) {
       console.error('[socket] connection init failed for user %s: %s', user.userId, error.message);
+      removeConnection(user.userId, socket.id);
       socket.emit('error', { message: 'Failed to initialize realtime session' });
       socket.disconnect(true);
       return;
@@ -75,19 +81,22 @@ function attachSocketServer(httpServer) {
 
     socket.on('chat:join', async ({ chatId }) => {
       if (!chatId) return;
-      const allowed = await chatAdapter.userHasAccess(user, chatId);
-      if (!allowed) return;
-      socket.join(`chat:${chatId}`);
-    });
-
-    socket.on('typing:start', async ({ chatId }) => {
-      if (!chatId) return;
+      if (socket.data.chatIdSet.has(chatId)) {
+        socket.join(`chat:${chatId}`);
+        return;
+      }
       try {
         const allowed = await chatAdapter.userHasAccess(user, chatId);
         if (!allowed) return;
+        socket.join(`chat:${chatId}`);
+        socket.data.chatIdSet.add(chatId);
       } catch {
-        return;
+        // silently ignore — joining is best-effort
       }
+    });
+
+    socket.on('typing:start', ({ chatId }) => {
+      if (!chatId || !socket.data.chatIdSet.has(chatId)) return;
 
       socket.to(`chat:${chatId}`).emit('typing:start', {
         chatId,
@@ -96,55 +105,37 @@ function attachSocketServer(httpServer) {
       });
 
       const key = typingKey(chatId, user.userId);
-      if (typingTimers.has(key)) {
-        clearTimeout(typingTimers.get(key));
-      }
+      if (typingTimers.has(key)) clearTimeout(typingTimers.get(key));
       typingTimers.set(
         key,
         setTimeout(() => {
-          socket.to(`chat:${chatId}`).emit('typing:stop', {
-            chatId,
-            userId: user.userId
-          });
+          socket.to(`chat:${chatId}`).emit('typing:stop', { chatId, userId: user.userId });
           typingTimers.delete(key);
         }, 3000)
       );
     });
 
-    socket.on('typing:stop', async ({ chatId }) => {
-      if (!chatId) return;
-      try {
-        const allowed = await chatAdapter.userHasAccess(user, chatId);
-        if (!allowed) return;
-      } catch {
-        return;
-      }
+    socket.on('typing:stop', ({ chatId }) => {
+      if (!chatId || !socket.data.chatIdSet.has(chatId)) return;
 
       const key = typingKey(chatId, user.userId);
       if (typingTimers.has(key)) {
         clearTimeout(typingTimers.get(key));
         typingTimers.delete(key);
       }
-      socket.to(`chat:${chatId}`).emit('typing:stop', {
-        chatId,
-        userId: user.userId
-      });
+      socket.to(`chat:${chatId}`).emit('typing:stop', { chatId, userId: user.userId });
     });
 
     socket.on('disconnect', () => {
       clearTypingTimersForUser(user.userId);
       removeConnection(user.userId, socket.id);
       if (!isUserOnline(user.userId)) {
-        // Use io.to() — socket is already closed at this point and cannot send.
-        chatAdapter.listChatIdsForUser(user).then((chatIds) => {
-          for (const chatId of chatIds) {
-            io.to(`chat:${chatId}`).emit('presence:offline', {
-              chatId,
-              userId: user.userId,
-              lastSeenAt: new Date().toISOString()
-            });
-          }
-        }).catch(() => {});
+        const lastSeenAt = new Date().toISOString();
+        getPool().query('update v3_users set last_seen_at=$1 where user_id=$2', [lastSeenAt, user.userId]).catch(() => {});
+        const chatIds = [...socket.data.chatIdSet];
+        for (const chatId of chatIds) {
+          io.to(`chat:${chatId}`).emit('presence:offline', { chatId, userId: user.userId, lastSeenAt });
+        }
       }
     });
   });

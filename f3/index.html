@@ -2,7 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' wss: ws:; worker-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'" />
     <title>PaVa Vak</title>
     <meta name="description" content="PaVa Vak — lightning-fast organisation messenger." />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -19,12 +20,15 @@
     <meta name="format-detection" content="telephone=no" />
 
     <!-- Icons -->
+    <link rel="icon" type="image/png" href="/icon.png" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.png" />
 
     <script type="module" src="/src/main.js"></script>
   </head>
   <body>
+    <div id="app-lock-splash"></div>
+    <script src="/lock-splash.js"></script>
     <div id="app"></div>
   </body>
 </html>

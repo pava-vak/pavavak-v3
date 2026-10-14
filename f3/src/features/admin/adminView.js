@@ -75,8 +75,14 @@ export function renderAdminView(state) {
             <button class="secondary-button" type="button" data-role="clear-otp">Dismiss</button>
           </div>
         ` : ''}
+        <div class="admin-users-header">
+          <span class="admin-users-label">Users</span>
+          <button class="admin-add-user-btn" type="button" data-role="open-add-user" title="Add new user">
+            + Add User
+          </button>
+        </div>
         <div class="admin-users">
-          ${state.users.filter(u => u.userId < 9000).map((user) => `
+          ${state.users.map((user) => `
             <div class="admin-user-row">
               <div class="admin-user-info">
                 <strong>${escapeHtml(user.displayName)}</strong>
@@ -91,6 +97,14 @@ export function renderAdminView(state) {
             </div>
           `).join('')}
         </div>
+        <div class="admin-broadcast-row">
+          <button class="primary-button admin-broadcast-btn" type="button" data-role="broadcast-update"
+            ${state.broadcastStatus === 'loading' ? 'disabled' : ''}>
+            ${state.broadcastStatus === 'loading' ? 'Broadcasting…' : '📲 Broadcast Update to All Chats'}
+          </button>
+          ${state.broadcastStatus === 'done' ? `<p class="admin-broadcast-result">✓ Sent to ${escapeHtml(String(state.broadcastCount))} chats</p>` : ''}
+          ${state.broadcastStatus === 'error' ? `<p class="error-text admin-broadcast-result">${escapeHtml(state.error)}</p>` : ''}
+        </div>
         <div class="admin-refresh-row">
           <button class="secondary-button" type="button" data-role="refresh-admin">Refresh</button>
         </div>
@@ -100,9 +114,50 @@ export function renderAdminView(state) {
   `;
 }
 
-export function bindAdminView(root, { onRefresh, onTabChange, onOpenMonitorChat, onResetPassword, onClearOtp }) {
+export function renderAddUserModal(state) {
+  const saving = state.addUserStatus === 'saving';
+  return `
+    <div class="admin-modal-overlay" data-role="close-add-user-overlay">
+      <div class="admin-modal" role="dialog" aria-modal="true" aria-label="Add new user">
+        <div class="admin-modal-header">
+          <h3>Add New User</h3>
+          <button class="admin-modal-close" data-role="close-add-user" aria-label="Close">✕</button>
+        </div>
+        <div class="admin-modal-body">
+          ${state.addUserError ? `<p class="error-text admin-modal-error">${escapeHtml(state.addUserError)}</p>` : ''}
+          <label class="admin-field-label" for="au-displayName">Display Name</label>
+          <input id="au-displayName" class="admin-field-input" type="text" name="displayName"
+            placeholder="e.g. Ravi Kumar" autocomplete="off" maxlength="80" />
+
+          <label class="admin-field-label" for="au-username">Username</label>
+          <input id="au-username" class="admin-field-input" type="text" name="username"
+            placeholder="e.g. ravi.kumar" autocomplete="off" maxlength="40"
+            pattern="[a-z0-9._-]+" />
+          <p class="admin-field-hint">Lowercase letters, numbers, dots, hyphens only</p>
+
+          <label class="admin-field-label" for="au-password">Password</label>
+          <div class="admin-pw-wrap">
+            <input id="au-password" class="admin-field-input" type="password" name="password"
+              placeholder="Min 8 characters" autocomplete="new-password" maxlength="128" />
+            <button type="button" class="admin-pw-toggle" data-role="toggle-add-user-pw" aria-label="Show/hide password">👁</button>
+          </div>
+        </div>
+        <div class="admin-modal-footer">
+          <button class="secondary-button" type="button" data-role="close-add-user" ${saving ? 'disabled' : ''}>Cancel</button>
+          <button class="primary-button" type="button" data-role="submit-add-user" ${saving ? 'disabled' : ''}>
+            ${saving ? 'Creating…' : 'Create User'}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+export function bindAdminView(root, { onRefresh, onTabChange, onOpenMonitorChat, onResetPassword, onClearOtp, onBroadcastUpdate, onOpenAddUser }) {
   root.querySelector('[data-role="refresh-admin"]')?.addEventListener('click', () => onRefresh?.());
   root.querySelector('[data-role="clear-otp"]')?.addEventListener('click', () => onClearOtp?.());
+  root.querySelector('[data-role="broadcast-update"]')?.addEventListener('click', () => onBroadcastUpdate?.());
+  root.querySelector('[data-role="open-add-user"]')?.addEventListener('click', () => onOpenAddUser?.());
 
   root.querySelectorAll('[data-role="reset-password"]').forEach((btn) => {
     btn.addEventListener('click', () => onResetPassword?.(Number(btn.dataset.userId)));
@@ -121,4 +176,47 @@ export function bindAdminView(root, { onRefresh, onTabChange, onOpenMonitorChat,
       });
     });
   });
+}
+
+export function bindAddUserModal(modalEl, { onClose, onSubmit }) {
+  modalEl.querySelector('[data-role="close-add-user"]')?.addEventListener('click', () => onClose?.());
+  modalEl.querySelector('[data-role="close-add-user-overlay"]')?.addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) onClose?.();
+  });
+
+  modalEl.querySelector('[data-role="toggle-add-user-pw"]')?.addEventListener('click', () => {
+    const input = modalEl.querySelector('#au-password');
+    if (input) input.type = input.type === 'password' ? 'text' : 'password';
+  });
+
+  modalEl.querySelector('[data-role="submit-add-user"]')?.addEventListener('click', () => {
+    const displayName = modalEl.querySelector('#au-displayName')?.value.trim() || '';
+    const username    = modalEl.querySelector('#au-username')?.value.trim().toLowerCase() || '';
+    const password    = modalEl.querySelector('#au-password')?.value || '';
+
+    const errorEl = modalEl.querySelector('.admin-modal-error') || (() => {
+      const p = document.createElement('p');
+      p.className = 'error-text admin-modal-error';
+      modalEl.querySelector('.admin-modal-body').prepend(p);
+      return p;
+    })();
+
+    if (!displayName) { errorEl.textContent = 'Display Name is required'; return; }
+    if (!username || username.length < 2) { errorEl.textContent = 'Username must be at least 2 characters'; return; }
+    if (!/^[a-z0-9._-]+$/.test(username)) { errorEl.textContent = 'Username: lowercase letters, numbers, dots, hyphens only'; return; }
+    if (!password || password.length < 8) { errorEl.textContent = 'Password must be at least 8 characters'; return; }
+    errorEl.textContent = '';
+
+    onSubmit?.({ displayName, username, password });
+  });
+
+  // Submit on Enter in any field
+  modalEl.querySelectorAll('.admin-field-input').forEach((input) => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') modalEl.querySelector('[data-role="submit-add-user"]')?.click();
+    });
+  });
+
+  // Focus first field
+  setTimeout(() => modalEl.querySelector('#au-displayName')?.focus(), 50);
 }

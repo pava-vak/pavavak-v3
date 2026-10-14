@@ -1,17 +1,18 @@
+// Refresh token is now an HttpOnly cookie — only the short-lived access token lives in localStorage.
 const ACCESS_KEY = 'pavav3.accessToken';
-const REFRESH_KEY = 'pavav3.refreshToken';
-const USER_KEY = 'pavav3.user';
+const USER_KEY   = 'pavav3.user';
 
 export function readTokens() {
   return {
     accessToken: window.localStorage.getItem(ACCESS_KEY) || '',
-    refreshToken: window.localStorage.getItem(REFRESH_KEY) || ''
   };
 }
 
 export function writeTokens(tokens) {
-  window.localStorage.setItem(ACCESS_KEY, tokens.accessToken || '');
-  window.localStorage.setItem(REFRESH_KEY, tokens.refreshToken || '');
+  if (tokens.accessToken) {
+    window.localStorage.setItem(ACCESS_KEY, tokens.accessToken);
+  }
+  // refreshToken is ignored — it's set as an HttpOnly cookie by the server
 }
 
 export function readUser() {
@@ -34,6 +35,7 @@ export function writeUser(user) {
 
 export function clearTokens() {
   window.localStorage.removeItem(ACCESS_KEY);
-  window.localStorage.removeItem(REFRESH_KEY);
   window.localStorage.removeItem(USER_KEY);
+  // Also clear legacy key if it exists from before the HttpOnly migration
+  window.localStorage.removeItem('pavav3.refreshToken');
 }

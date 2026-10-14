@@ -2,6 +2,55 @@ import { config } from './config.js';
 import { clearTokens, readTokens, writeTokens, readUser, writeUser } from './tokenStore.js';
 import { updateSocketToken } from './socketClient.js';
 
+export async function uploadMedia({ data, mimeType }) {
+  return apiRequest('/api/v3/media/upload', {
+    method: 'POST',
+    body: JSON.stringify({ data, mimeType })
+  });
+}
+
+export async function uploadBinaryBlob(blob, mimeType, endpoint = '/api/v3/media/upload-binary') {
+  const { accessToken } = readTokens();
+  const url = `${config.apiBaseUrl}${endpoint}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': mimeType, ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+    body: blob
+  });
+  const json = await response.json();
+  if (!response.ok) throw new Error(json.error || 'Upload failed');
+  return json;
+}
+
+export async function uploadVideoBlob(blob, mimeType) {
+  const { accessToken } = readTokens();
+  const url = `${config.apiBaseUrl}/api/v3/media/upload-video`;
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': mimeType,
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+    },
+    body: blob
+  });
+  const json = await response.json();
+  if (!response.ok) throw new Error(json.error || 'Upload failed');
+  return json;
+}
+
+export async function requestMediaBlob(fileId) {
+  const { accessToken } = readTokens();
+  const url = `${config.apiBaseUrl}/api/v3/media/${encodeURIComponent(fileId)}`;
+  const response = await fetch(url, {
+    credentials: 'include',
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
+  });
+  if (!response.ok) throw new Error('Media not accessible');
+  return response.blob();
+}
+
 let refreshPromise = null;
 let onUnauthorized = null;
 
@@ -34,12 +83,13 @@ async function request(path, options = {}, allowRefresh = true) {
 
   const response = await fetch(url, {
     ...options,
+    credentials: 'include',
     headers
   });
 
   const payload = await parseResponse(response);
 
-  if (response.status === 401 && allowRefresh && tokens.refreshToken && !path.endsWith('/auth/refresh')) {
+  if (response.status === 401 && allowRefresh && !path.endsWith('/auth/refresh')) {
     try {
       refreshPromise ??= refreshSession().finally(() => {
         refreshPromise = null;
@@ -102,10 +152,10 @@ export async function fetchMe() {
 }
 
 export async function refreshSession() {
-  const { refreshToken } = readTokens();
+  // Refresh token is in the HttpOnly cookie — no body needed
   const result = await request('/api/v3/auth/refresh', {
     method: 'POST',
-    body: JSON.stringify({ refreshToken })
+    body: JSON.stringify({})
   }, false);
   writeTokens(result.tokens);
   if (result.user) {
@@ -115,7 +165,13 @@ export async function refreshSession() {
   return result;
 }
 
-export function logout() {
+export async function logout() {
+  try {
+    // Server clears the HttpOnly cookie via Set-Cookie; credentials: 'include' sends it
+    await request('/api/v3/auth/logout', { method: 'POST', body: JSON.stringify({}) }, false);
+  } catch {
+    // best-effort — clear local tokens regardless
+  }
   clearTokens();
 }
 
@@ -139,6 +195,13 @@ export async function sendMessage(input) {
 
 export async function openViewOnceMessage(messageId) {
   return request(`/api/v3/messages/${encodeURIComponent(messageId)}/view-once-open`, { method: 'POST' });
+}
+
+export async function updateProfile(input) {
+  return apiRequest('/api/v3/users/me', {
+    method: 'PUT',
+    body: JSON.stringify(input)
+  });
 }
 
 export async function changePassword(input) {
@@ -172,6 +235,13 @@ export async function requestAdminChats() {
 
 export async function requestAdminResetPassword(userId) {
   return request(`/api/v3/admin/users/${userId}/reset-password`, { method: 'POST' });
+}
+
+export async function requestAdminCreateUser({ username, displayName, password }) {
+  return request('/api/v3/admin/users', {
+    method: 'POST',
+    body: JSON.stringify({ username, displayName, password })
+  });
 }
 
 export async function requestAdminThread(chatId, cursor = null) {
@@ -220,6 +290,176 @@ export async function markRead(chatId, messageId) {
   });
 }
 
+export async function requestDeleteMessage(messageId) {
+  return request(`/api/v3/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' });
+}
+
+export async function requestDeleteChat(chatId) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' });
+}
+
+export async function requestBroadcastUpdate() {
+  return apiRequest('/api/v3/admin/broadcast-update', { method: 'POST' });
+}
+
+export async function requestClearChat(chatId) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/messages`, { method: 'DELETE' });
+}
+
 export function getCachedUser() {
   return readUser();
+}
+
+// ── New feature API calls ──────────────────────────────────────────────────
+
+export async function reactToMessage(messageId, emoji) {
+  return request(`/api/v3/messages/${encodeURIComponent(messageId)}/react`, {
+    method: 'POST', body: JSON.stringify({ emoji })
+  });
+}
+
+export async function fetchChatReactions(chatId) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/reactions`);
+}
+
+export async function editMessage(messageId, text) {
+  return request(`/api/v3/messages/${encodeURIComponent(messageId)}`, {
+    method: 'PUT', body: JSON.stringify({ text })
+  });
+}
+
+export async function forwardMessage(messageId, chatId) {
+  return request(`/api/v3/messages/${encodeURIComponent(messageId)}/forward`, {
+    method: 'POST', body: JSON.stringify({ chatId })
+  });
+}
+
+export async function pinMessage(chatId, messageId) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/pin`, {
+    method: 'PUT', body: JSON.stringify({ messageId })
+  });
+}
+
+export async function fetchPinnedMessage(chatId) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/pin`);
+}
+
+export async function archiveChat(chatId, archived) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/archive`, {
+    method: 'PUT', body: JSON.stringify({ archived })
+  });
+}
+
+export async function muteChat(chatId, muted) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/mute`, {
+    method: 'PUT', body: JSON.stringify({ muted })
+  });
+}
+
+export async function setChatBackground(chatId, background) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/background`, {
+    method: 'PUT', body: JSON.stringify({ background })
+  });
+}
+
+export async function fetchPresence(userId) {
+  return request(`/api/v3/users/${encodeURIComponent(userId)}/presence`);
+}
+
+export async function globalSearch(q) {
+  return request(`/api/v3/search?q=${encodeURIComponent(q)}`);
+}
+
+export async function fetchLinkPreview(url) {
+  return request(`/api/v3/link-preview?url=${encodeURIComponent(url)}`);
+}
+
+export async function createGroupChat(title, memberIds) {
+  return request('/api/v3/chats/group', { method: 'POST', body: JSON.stringify({ title, memberIds }) });
+}
+
+export async function renameGroup(chatId, title) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/group/title`, {
+    method: 'PUT', body: JSON.stringify({ title })
+  });
+}
+
+export async function addGroupMember(chatId, userId) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/group/members`, {
+    method: 'POST', body: JSON.stringify({ userId })
+  });
+}
+
+export async function removeGroupMember(chatId, userId) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/group/members/${encodeURIComponent(userId)}`, {
+    method: 'DELETE'
+  });
+}
+
+export async function createPoll(chatId, question, options) {
+  return request('/api/v3/polls', { method: 'POST', body: JSON.stringify({ chatId, question, options }) });
+}
+
+export async function votePoll(messageId, optionIndex) {
+  return request(`/api/v3/polls/${encodeURIComponent(messageId)}/vote`, {
+    method: 'POST', body: JSON.stringify({ optionIndex })
+  });
+}
+
+export async function fetchPoll(messageId) {
+  return request(`/api/v3/polls/${encodeURIComponent(messageId)}`);
+}
+
+export async function fetchScheduledMessages() {
+  return request('/api/v3/scheduled-messages');
+}
+
+export async function scheduleMessage(chatId, text, scheduledAt) {
+  return request('/api/v3/scheduled-messages', {
+    method: 'POST', body: JSON.stringify({ chatId, text, scheduledAt })
+  });
+}
+
+export async function cancelScheduledMessage(id) {
+  return request(`/api/v3/scheduled-messages/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function fetchChatMembers(chatId) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/members`);
+}
+
+export async function uploadAvatar(blob, mimeType) {
+  const { accessToken } = readTokens();
+  const url = `${config.apiBaseUrl}/api/v3/media/upload-binary`;
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': mimeType, ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
+    body: blob
+  });
+  const json = await response.json();
+  if (!response.ok) throw new Error(json.error || 'Upload failed');
+  return json;
+}
+
+export async function fetchChatMedia(chatId, cursor = null) {
+  const params = new URLSearchParams({ limit: '60' });
+  if (cursor) params.set('cursor', cursor);
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/media?${params}`);
+}
+
+export async function fetchAdminChatMedia(chatId, cursor = null) {
+  const params = new URLSearchParams({ limit: '60' });
+  if (cursor) params.set('cursor', cursor);
+  return request(`/api/v3/admin/chats/${encodeURIComponent(chatId)}/media?${params}`);
+}
+
+export async function starMessage(messageId) {
+  return request(`/api/v3/messages/${encodeURIComponent(messageId)}/star`, { method: 'POST' });
+}
+export async function unstarMessage(messageId) {
+  return request(`/api/v3/messages/${encodeURIComponent(messageId)}/star`, { method: 'DELETE' });
+}
+export async function fetchStarredMessages() {
+  return request('/api/v3/starred-messages');
 }

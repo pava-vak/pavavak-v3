@@ -13,6 +13,7 @@
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
-    "vite": "^7.1.7"
+    "vite": "^7.1.7",
+    "vite-plugin-compression2": "^2.5.3"
   }
 }

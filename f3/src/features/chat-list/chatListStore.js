@@ -1,4 +1,4 @@
-import { requestChats } from '../../shared/apiClient.js';
+import { requestChats, requestDeleteChat } from '../../shared/apiClient.js';
 
 export function createChatListStore() {
   let state = {
@@ -24,11 +24,13 @@ export function createChatListStore() {
     setState({ status: 'loading', error: '' });
     try {
       const result = await requestChats();
-      setState({
-        status: 'ready',
-        items: result.items || [],
-        error: ''
-      });
+      const items = result.items || [];
+      setState({ status: 'ready', items, error: '' });
+      // Clear stale tray notifications when all chats are read
+      const totalUnread = items.reduce((n, c) => n + (c.unreadCount || 0), 0);
+      if (totalUnread === 0 && navigator.serviceWorker?.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_NOTIFICATIONS' });
+      }
     } catch (error) {
       setState({
         status: 'error',
@@ -118,6 +120,15 @@ export function createChatListStore() {
     });
   }
 
+  function removeChat(chatId) {
+    setState({ items: state.items.filter((c) => c.chatId !== chatId) });
+  }
+
+  async function deleteChat(chatId) {
+    await requestDeleteChat(chatId);
+    setState({ items: state.items.filter((c) => c.chatId !== chatId) });
+  }
+
   function reset() {
     setState({
       status: 'idle',
@@ -137,6 +148,8 @@ export function createChatListStore() {
     applyChatUpdated,
     applyChatRead,
     applyMessageStatus,
+    removeChat,
+    deleteChat,
     reset,
     getState() {
       return state;

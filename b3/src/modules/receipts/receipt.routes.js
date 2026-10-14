@@ -24,7 +24,6 @@ function registerReceiptRoutes(app) {
     try {
       const result = await markDelivered(request.auth, parsed.data.chatId, request.params.messageId);
       const deliveredPayload = { chatId: parsed.data.chatId, messageId: result.messageId, status: result.status };
-      console.log('[receipt] emitMessageDelivered → userId=%s payload=%j', result.senderUserId || request.auth.userId, deliveredPayload);
       realtime.emitMessageDelivered(result.senderUserId || request.auth.userId, deliveredPayload);
       return {
         success: true,
@@ -95,7 +94,6 @@ function registerReceiptRoutes(app) {
       });
       for (const receipt of result.updatedReceipts || []) {
         const readPayload = { chatId: request.params.chatId, messageId: receipt.messageId, status: 'read', unreadCount: 0 };
-        console.log('[receipt] emitMessageRead → userId=%s payload=%j', receipt.senderUserId || request.auth.userId, readPayload);
         realtime.emitMessageRead(receipt.senderUserId || request.auth.userId, readPayload);
       }
       return {

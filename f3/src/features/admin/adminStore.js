@@ -1,4 +1,4 @@
-import { requestAdminChats, requestAdminSummary, requestAdminUsers, requestAdminResetPassword } from '../../shared/apiClient.js';
+import { requestAdminChats, requestAdminSummary, requestAdminUsers, requestAdminResetPassword, requestAdminCreateUser, requestBroadcastUpdate } from '../../shared/apiClient.js';
 
 export function createAdminStore() {
   let state = {
@@ -9,6 +9,10 @@ export function createAdminStore() {
     monitorChats: [],
     monitorStatus: 'idle',
     otpResult: null,
+    broadcastStatus: 'idle',
+    broadcastCount: 0,
+    addUserStatus: 'idle', // 'idle' | 'saving' | 'error'
+    addUserError: '',
     error: ''
   };
 
@@ -65,6 +69,44 @@ export function createAdminStore() {
     setState({ otpResult: null });
   }
 
+  async function createUser({ username, displayName, password }) {
+    setState({ addUserStatus: 'saving', addUserError: '' });
+    try {
+      const result = await requestAdminCreateUser({ username, displayName, password });
+      setState({
+        addUserStatus: 'idle',
+        users: [...state.users, result.user],
+        summary: state.summary ? { ...state.summary, users: state.summary.users + 1 } : state.summary
+      });
+      return { success: true };
+    } catch (error) {
+      // Extract Zod field errors when available
+      const details = error?.payload?.details?.fieldErrors || {};
+      const fieldMsgs = Object.entries(details)
+        .map(([field, msgs]) => `${field}: ${msgs[0]}`)
+        .join(', ');
+      const msg = fieldMsgs || error?.message || 'Failed to create user';
+      setState({ addUserStatus: 'error', addUserError: msg });
+      return { success: false, error: msg };
+    }
+  }
+
+  function clearAddUserError() {
+    setState({ addUserStatus: 'idle', addUserError: '' });
+  }
+
+  async function broadcastUpdate() {
+    setState({ broadcastStatus: 'loading' });
+    try {
+      const result = await requestBroadcastUpdate();
+      setState({ broadcastStatus: 'done', broadcastCount: result.count || 0 });
+      setTimeout(() => setState({ broadcastStatus: 'idle', broadcastCount: 0 }), 4000);
+    } catch (error) {
+      setState({ broadcastStatus: 'error', error: error.message || 'Failed to broadcast' });
+      setTimeout(() => setState({ broadcastStatus: 'idle' }), 4000);
+    }
+  }
+
   function setTab(tab) {
     setState({ activeTab: tab });
     if (tab === 'monitor' && state.monitorStatus === 'idle') {
@@ -95,6 +137,9 @@ export function createAdminStore() {
     loadMonitorChats,
     resetPassword,
     clearOtp,
+    broadcastUpdate,
+    createUser,
+    clearAddUserError,
     setTab,
     reset,
     getState() {

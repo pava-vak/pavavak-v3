@@ -3,6 +3,7 @@ const { requireAuth } = require('../../shared/security/auth.preHandler');
 const chatAdapter = require('../../db/chatAdapter');
 const realtime = require('../../realtime/eventEmitter');
 const { sendPushToUser } = require('../notifications/push.service');
+const { getPool } = require('../../db/pool');
 
 const DELETE_AFTER_DURATIONS = {
   '1h': 60 * 60 * 1000,
@@ -18,9 +19,58 @@ const sendMessageSchema = z.object({
 });
 
 function registerMessageRoutes(app) {
-  app.post('/api/v3/messages/:messageId/view-once-open', { preHandler: requireAuth }, async (request) => {
-    await chatAdapter.openViewOnceMessage(request.auth, request.params.messageId);
-    return { success: true };
+  app.delete('/api/v3/messages/:messageId', { preHandler: requireAuth }, async (request, reply) => {
+    try {
+      const { messageId, conversationId, memberIds } = await chatAdapter.deleteMessage(request.auth, request.params.messageId);
+      realtime.emitMessageDeletedToMembers(conversationId, messageId, memberIds);
+      return { success: true };
+    } catch (error) {
+      const status = error.status || 500;
+      if (status >= 500) request.log.error({ err: error }, 'Failed to delete message');
+      return reply.status(status).send({
+        success: false,
+        error: status >= 500 ? 'Internal server error' : (error.message || 'Failed to delete message')
+      });
+    }
+  });
+
+  app.delete('/api/v3/chats/:chatId/messages', { preHandler: requireAuth }, async (request, reply) => {
+    try {
+      await chatAdapter.clearChatMessages(request.auth, request.params.chatId);
+      return { success: true };
+    } catch (error) {
+      const status = error.status || 500;
+      if (status >= 500) request.log.error({ err: error }, 'Failed to clear chat');
+      return reply.status(status).send({
+        success: false,
+        error: status >= 500 ? 'Internal server error' : (error.message || 'Failed to clear chat')
+      });
+    }
+  });
+
+  app.delete('/api/v3/chats/:chatId', { preHandler: requireAuth }, async (request, reply) => {
+    try {
+      await chatAdapter.deleteConversation(request.auth, request.params.chatId);
+      return { success: true };
+    } catch (error) {
+      const status = error.status || 500;
+      if (status >= 500) request.log.error({ err: error }, 'Failed to delete chat');
+      return reply.status(status).send({
+        success: false,
+        error: status >= 500 ? 'Internal server error' : (error.message || 'Failed to delete chat')
+      });
+    }
+  });
+
+  app.post('/api/v3/messages/:messageId/view-once-open', { preHandler: requireAuth }, async (request, reply) => {
+    try {
+      await chatAdapter.openViewOnceMessage(request.auth, request.params.messageId);
+      return { success: true };
+    } catch (error) {
+      const status = error.status || 500;
+      if (status >= 500) request.log.error({ err: error }, 'Failed to mark view-once open');
+      return reply.status(status).send({ success: false, error: status >= 500 ? 'Internal server error' : error.message });
+    }
   });
 
   app.post('/api/v3/messages', {
@@ -67,6 +117,16 @@ function registerMessageRoutes(app) {
         status: message.status
       };
 
+      // Fetch muted members once to skip push for them
+      let mutedUserIds = new Set();
+      try {
+        const { rows: mutedRows } = await getPool().query(
+          'select user_id from v3_conversation_members where conversation_id=$1 and muted=true',
+          [parsed.data.chatId]
+        );
+        mutedUserIds = new Set(mutedRows.map(r => r.user_id));
+      } catch { /* non-fatal — proceed without mute check */ }
+
       for (const memberId of targets) {
         const isSender = memberId === request.auth.userId;
         realtime.emitChatUpdated(memberId, {
@@ -81,14 +141,12 @@ function registerMessageRoutes(app) {
           unreadCount: isSender ? 0 : undefined
         });
 
-        // Send Web Push to recipients who are not the sender
-        if (!isSender) {
+        // Send Web Push only to recipients who are not the sender and have not muted the chat
+        if (!isSender && !mutedUserIds.has(memberId)) {
           sendPushToUser(memberId, {
             chatId: parsed.data.chatId,
-            title: request.auth.displayName || request.auth.username,
-            body: parsed.data.viewOnce
-              ? '👁 View once message'
-              : (parsed.data.text.length > 100 ? parsed.data.text.slice(0, 97) + '…' : parsed.data.text),
+            title: 'PaVa Vak',
+            body: `${request.auth.displayName || request.auth.username} sent a message`,
             icon: '/icon.svg',
             badge: '/icon.svg'
           }).catch(() => {});

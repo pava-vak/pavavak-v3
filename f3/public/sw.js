@@ -1,5 +1,7 @@
-const SHELL_CACHE = 'pava-shell-v3';
-const ASSET_CACHE = 'pava-assets-v3';
+// __SW_VERSION__ is replaced at build time by the injectSwVersion plugin in vite.config.js
+const _v = typeof __SW_VERSION__ !== 'undefined' ? __SW_VERSION__ : 'dev';
+const SHELL_CACHE = `pava-shell-${_v}`;
+const ASSET_CACHE = `pava-assets-${_v}`;
 
 // On install: cache the navigation shell only
 self.addEventListener('install', (event) => {
@@ -66,7 +68,8 @@ self.addEventListener('fetch', (event) => {
     fetch(event.request)
       .then((response) => {
         if (response.ok) {
-          caches.open(SHELL_CACHE).then((cache) => cache.put(event.request, response.clone()));
+          const clone = response.clone();
+          caches.open(SHELL_CACHE).then((cache) => cache.put(event.request, clone));
         }
         return response;
       })
@@ -74,27 +77,42 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// ── Push: show notification ───────────────────────────────────────────────
+// ── Push: show notification (skip if any client window is focused) ────────
 self.addEventListener('push', (event) => {
-  let data = {};
-  try {
-    data = event.data ? event.data.json() : {};
-  } catch {
-    data = { title: 'PaVa', body: event.data ? event.data.text() : 'New message' };
+  event.waitUntil((async () => {
+    let data = {};
+    try {
+      data = event.data ? event.data.json() : {};
+    } catch {
+      data = { title: 'PaVa', body: event.data ? event.data.text() : 'New message' };
+    }
+
+    // Suppress notification if the app is already open and in focus
+    const windowClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    if (windowClients.some(c => c.focused)) return;
+
+    const title = data.title || 'PaVa';
+    const options = {
+      body: data.body || 'You have a new message',
+      icon: data.icon || '/icon.svg',
+      badge: data.badge || '/icon.svg',
+      tag: data.chatId || 'pava-message',
+      renotify: true,
+      data: { chatId: data.chatId || '' },
+      vibrate: [100, 50, 100]
+    };
+
+    await self.registration.showNotification(title, options);
+  })());
+});
+
+// ── Message from client: clear all notifications ──────────────────────────
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'CLEAR_NOTIFICATIONS') {
+    event.waitUntil(
+      self.registration.getNotifications().then(notifs => notifs.forEach(n => n.close()))
+    );
   }
-
-  const title = data.title || 'PaVa';
-  const options = {
-    body: data.body || 'You have a new message',
-    icon: data.icon || '/icon.svg',
-    badge: data.badge || '/icon.svg',
-    tag: data.chatId || 'pava-message',
-    renotify: true,
-    data: { chatId: data.chatId || '' },
-    vibrate: [100, 50, 100]
-  };
-
-  event.waitUntil(self.registration.showNotification(title, options));
 });
 
 // ── Notification click: open / focus the app ──────────────────────────────

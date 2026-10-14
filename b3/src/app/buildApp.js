@@ -1,6 +1,7 @@
 ﻿const Fastify = require('fastify');
 const cors = require('@fastify/cors');
 const helmet = require('@fastify/helmet');
+const cookie = require('@fastify/cookie');
 const rateLimit = require('@fastify/rate-limit');
 const { env } = require('../config/env');
 const { registerHealthRoutes } = require('../modules/health/health.routes');
@@ -12,15 +13,37 @@ const { registerReceiptRoutes } = require('../modules/receipts/receipt.routes');
 const { registerUserRoutes } = require('../modules/users/user.routes');
 const { registerAdminRoutes } = require('../modules/admin/admin.routes');
 const { registerPushRoutes } = require('../modules/notifications/push.routes');
+const { registerMediaRoutes } = require('../modules/media/media.routes');
+const { registerFeatureRoutes } = require('../modules/features/features.routes');
 
 function buildApp() {
   const app = Fastify({
-    logger: {
-      level: env.LOG_LEVEL
-    }
+    logger: { level: env.LOG_LEVEL },
+    bodyLimit: 6 * 1024 * 1024  // 6 MB — covers base64-encoded images up to ~4.5 MB
   });
 
-  app.register(helmet, { global: true });
+  app.register(cookie);
+
+  app.register(helmet, {
+    global: true,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc:  ["'self'"],
+        styleSrc:   ["'self'", "'unsafe-inline'"],
+        imgSrc:     ["'self'", 'blob:', 'data:'],
+        mediaSrc:   ["'self'", 'blob:'],
+        connectSrc: ["'self'", 'wss:', 'ws:'],
+        workerSrc:  ["'self'"],
+        fontSrc:    ["'self'"],
+        objectSrc:  ["'none'"],
+        frameAncestors: ["'none'"],
+        baseUri:    ["'self'"],
+      },
+    },
+    crossOriginResourcePolicy: { policy: 'same-site' },
+  });
+
   app.register(cors, {
     origin: env.webOrigins,
     credentials: true
@@ -45,6 +68,8 @@ function buildApp() {
     registerUserRoutes(instance);
     registerAdminRoutes(instance);
     registerPushRoutes(instance);
+    registerMediaRoutes(instance);
+    registerFeatureRoutes(instance);
   });
 
   app.setErrorHandler((error, request, reply) => {
