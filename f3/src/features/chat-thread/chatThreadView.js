@@ -456,7 +456,7 @@ const WALLPAPER_CSS = {
   teal: 'linear-gradient(135deg,#0a2a2a,#1a5a5a)',
 };
 
-export function renderChatThreadView({ activeChat, threadState, composerValue = '', readOnly = false, viewOnce = false, deleteAfter = 'never', reactions = null, pinnedMessage = null }) {
+export function renderChatThreadView({ activeChat, threadState, composerValue = '', readOnly = false, viewOnce = false, deleteAfter = 'never', reactions = null, pinnedMessage = null, threadSearch = null }) {
   if (!activeChat) {
     return `
       <section class="thread-panel empty-thread">
@@ -489,6 +489,7 @@ export function renderChatThreadView({ activeChat, threadState, composerValue = 
       </p>
     </div>
     <button class="thread-header-action" data-role="open-media-gallery" title="Media gallery" aria-label="Media gallery">🖼</button>
+    <button class="thread-header-action ${threadSearch ? 'active' : ''}" data-role="open-thread-search" title="Search in chat" aria-label="Search messages">🔍</button>
     ${!readOnly ? `<button class="thread-header-action" data-role="clear-chat" title="Clear chat" aria-label="Clear chat">🗑</button>` : ''}
   `;
 
@@ -521,9 +522,25 @@ export function renderChatThreadView({ activeChat, threadState, composerValue = 
     `;
   }
 
+  const searchQuery = threadSearch?.query?.trim() || '';
+  const filteredItems = searchQuery.length >= 2
+    ? (threadState.items || []).filter(m => {
+        if (!m.text) return false;
+        const cleaned = m.text.startsWith('__IMG__:') || m.text.startsWith('__VID__:') || m.text.startsWith('__AUD__:') ? '' : m.text;
+        return cleaned.toLowerCase().includes(searchQuery.toLowerCase());
+      })
+    : null;
+  const searchBar = threadSearch ? `
+    <div class="thread-search-bar">
+      <input class="thread-search-input" type="search" placeholder="Search messages…" value="${escapeHtml(threadSearch.query || '')}" data-role="thread-search-input" autocomplete="off" />
+      <button class="thread-search-close" data-role="close-thread-search" aria-label="Close search">✕</button>
+      ${searchQuery.length >= 2 ? `<span class="thread-search-count">${filteredItems?.length || 0} result${filteredItems?.length !== 1 ? 's' : ''}</span>` : ''}
+    </div>` : '';
+
   return `
     <section class="thread-panel">
       <div class="thread-header">${backButton()}${headerInfo}</div>
+      ${searchBar}
       ${monitorBar}
       ${threadState.hasMore ? `
         <button class="secondary-button load-more-button" data-role="load-more" ${threadState.loadMoreStatus === 'loading' ? 'disabled' : ''}>
@@ -539,7 +556,11 @@ export function renderChatThreadView({ activeChat, threadState, composerValue = 
       <div class="thread-messages-wrap">
         <div class="thread-messages" data-role="thread-messages"
              ${activeChat?.background && WALLPAPER_CSS[activeChat.background] ? `style="background:${WALLPAPER_CSS[activeChat.background]}"` : ''}>
-          ${renderMessagesWithSeparators(threadState.items, readOnly, reactions, readOnly)}
+          ${filteredItems !== null
+            ? (filteredItems.length === 0
+                ? `<p class="muted thread-search-empty">No messages found for "${escapeHtml(searchQuery)}"</p>`
+                : renderMessagesWithSeparators(filteredItems, readOnly, reactions, readOnly))
+            : renderMessagesWithSeparators(threadState.items, readOnly, reactions, readOnly)}
         </div>
         <button class="scroll-to-new-btn hidden" data-role="scroll-to-new" aria-label="New messages">
           ↓ <span data-role="new-count">0</span> new

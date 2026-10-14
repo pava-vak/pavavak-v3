@@ -88,6 +88,7 @@ export async function isPlatformAvailable() {
 // ── Enrollment status ─────────────────────────────────────────────────────────
 
 const ENROLLED_CACHE = 'pava-bio-enrolled';
+const ENABLED_KEY = 'pava-app-lock-enabled';
 
 // Quick sync check from local cache (use to avoid a network hit on boot)
 export function hasEnrolledLocally() {
@@ -121,6 +122,7 @@ export async function enroll() {
 
   await biometricEnrollFinish(serializeCredential(credential));
   localStorage.setItem(ENROLLED_CACHE, '1');
+  localStorage.setItem(ENABLED_KEY, 'true');
 }
 
 // ── Verify (unlock) ───────────────────────────────────────────────────────────
@@ -147,8 +149,6 @@ export async function revoke() {
 }
 
 // ── Lock state ────────────────────────────────────────────────────────────────
-
-const ENABLED_KEY = 'pava-app-lock-enabled';
 
 export function isEnabled() {
   return localStorage.getItem(ENABLED_KEY) === 'true';

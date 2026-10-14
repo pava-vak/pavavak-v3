@@ -10,6 +10,7 @@ const {
   signRefreshToken,
   verifyRefreshToken
 } = require('../../shared/security/token.service');
+const sessions = require('./sessions.repository');
 
 const devLoginSchema = z.object({
   userId: z.coerce.number().int().positive(),
@@ -50,15 +51,22 @@ const COOKIE_OPTS = {
   // secure is set dynamically — true in production, false in dev so localhost works without HTTPS
 };
 
-async function issueSession(user, reply) {
+async function issueSession(user, reply, { userAgent = '', ip = '', sessionId = null } = {}) {
   const publicUser = identity.publicUser(user);
   const sessionUser = {
     ...publicUser,
     tokenVersion: Number(user.tokenVersion || 0)
   };
+
+  let sid = sessionId;
+  if (!sid && sessions.isAvailable()) {
+    sid = await sessions.createSession(user.userId, { userAgent, ip });
+  }
+
+  const refreshPayload = sid ? { ...sessionUser, sid } : sessionUser;
   const [accessToken, refreshToken] = await Promise.all([
     signAccessToken(sessionUser),
-    signRefreshToken(sessionUser)
+    signRefreshToken(refreshPayload)
   ]);
 
   const secure = env.APP_ENV === 'production';
@@ -70,7 +78,8 @@ async function issueSession(user, reply) {
       accessToken,
       tokenType: 'Bearer'
     },
-    user: publicUser
+    user: publicUser,
+    ...(sid ? { sessionId: sid } : {})
   };
 }
 
@@ -166,11 +175,13 @@ function registerAuthRoutes(app) {
       loginThrottle.reset(throttleKeys);
 
       // Transparently re-hash PBKDF2 passwords to Argon2id on successful login
+      const _loginUa = request.headers['user-agent'] || '';
+      const _loginIp = request.ip || '';
       if (needsRehash(user.passwordHash)) {
         identity.setPasswordHash(user.userId, await hashPassword(parsed.data.password)).catch(() => {});
       }
 
-      return issueSession(user, reply);
+      return issueSession(user, reply, { userAgent: _loginUa, ip: _loginIp });
     });
 
     fastify.post('/api/v3/auth/dev-login', async (request, reply) => {
@@ -217,7 +228,18 @@ function registerAuthRoutes(app) {
         if (!user || user.disabled || Number(claims.tv || 0) !== Number(user.tokenVersion || 0)) {
           throw new Error('Invalid refresh token');
         }
-        return issueSession(user, reply);
+        // If session tracking is active, validate the session still exists
+        const sid = claims.sid;
+        if (sid && sessions.isAvailable()) {
+          const sessionRow = await sessions.getSession(sid);
+          if (!sessionRow) throw new Error('Invalid refresh token');
+          sessions.touchSession(sid).catch(() => {});
+        }
+        return issueSession(user, reply, {
+          userAgent: request.headers['user-agent'] || '',
+          ip: request.ip || '',
+          sessionId: sid || null
+        });
       } catch (error) {
         // JWT library errors have specific names; our manual throw has the exact message.
         // Anything else (DB connectivity, pool errors) should return 503 so the client retries.
@@ -236,6 +258,11 @@ function registerAuthRoutes(app) {
 
     fastify.post('/api/v3/auth/logout', { preHandler: requireAuth }, async (request, reply) => {
       try {
+        // Delete the current session if session_id was passed
+        const sid = request.headers['x-session-id'];
+        if (sid && sessions.isAvailable()) {
+          await sessions.deleteSession(sid, request.auth.userId).catch(() => {});
+        }
         await identity.incrementTokenVersion(request.auth.userId);
         reply.clearCookie(REFRESH_COOKIE, { path: '/api/v3/auth' });
         return { success: true };
@@ -243,6 +270,34 @@ function registerAuthRoutes(app) {
         return sendCaughtError(request, reply, error, 'Failed to logout');
       }
     });
+  });
+
+  // ── Session management ───────────────────────────────────────────────────────
+  app.get('/api/v3/auth/sessions', { preHandler: requireAuth }, async (request) => {
+    if (!sessions.isAvailable()) return { success: true, sessions: [] };
+    const currentSid = request.headers['x-session-id'] || null;
+    const list = await sessions.listSessions(request.auth.userId);
+    return {
+      success: true,
+      sessions: list.map(s => ({ ...s, isCurrent: s.id === currentSid }))
+    };
+  });
+
+  app.delete('/api/v3/auth/sessions/:id', { preHandler: requireAuth }, async (request, reply) => {
+    if (!sessions.isAvailable()) return { success: true };
+    const deleted = await sessions.deleteSession(request.params.id, request.auth.userId);
+    if (!deleted) return reply.status(404).send({ success: false, error: 'Session not found' });
+    return { success: true };
+  });
+
+  app.delete('/api/v3/auth/sessions', { preHandler: requireAuth }, async (request, reply) => {
+    // Sign out all devices by incrementing tokenVersion and deleting all session records
+    if (sessions.isAvailable()) {
+      await sessions.deleteAllSessions(request.auth.userId).catch(() => {});
+    }
+    await identity.incrementTokenVersion(request.auth.userId);
+    reply.clearCookie(REFRESH_COOKIE, { path: '/api/v3/auth' });
+    return { success: true };
   });
 
   app.get('/api/v3/me', { preHandler: requireAuth }, async (request) => ({

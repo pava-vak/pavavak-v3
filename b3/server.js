@@ -6,6 +6,7 @@ const { closePool } = require('./src/db/pool');
 const scheduledMessages = require('./src/jobs/scheduledMessages');
 const autoDelete = require('./src/jobs/autoDelete');
 const biometricRepo = require('./src/modules/biometric/biometric.repository');
+const sessionsRepo = require('./src/modules/auth/sessions.repository');
 
 let app;
 let io;
@@ -19,6 +20,7 @@ async function start() {
   await app.listen({ port, host: '0.0.0.0' });
   app.log.info({ port }, 'b3 listening');
   await biometricRepo.ensureTable();
+  await sessionsRepo.ensureTable();
   scheduledMessages.start();
   autoDelete.start();
 }

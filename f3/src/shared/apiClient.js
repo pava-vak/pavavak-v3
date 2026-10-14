@@ -65,6 +65,16 @@ async function parseResponse(response) {
   }));
 }
 
+function readSessionId() {
+  try { return localStorage.getItem('pava_session_id') || null; } catch { return null; }
+}
+function writeSessionId(sid) {
+  try { if (sid) localStorage.setItem('pava_session_id', sid); } catch {}
+}
+function clearSessionId() {
+  try { localStorage.removeItem('pava_session_id'); } catch {}
+}
+
 async function request(path, options = {}, allowRefresh = true) {
   const url = `${config.apiBaseUrl}${path}`;
   const tokens = readTokens();
@@ -76,6 +86,8 @@ async function request(path, options = {}, allowRefresh = true) {
   if (tokens.accessToken) {
     headers.set('Authorization', `Bearer ${tokens.accessToken}`);
   }
+  const sid = readSessionId();
+  if (sid) headers.set('X-Session-Id', sid);
 
   const response = await fetch(url, {
     ...options,
@@ -118,6 +130,7 @@ export async function devLogin(input) {
   }, false);
   writeTokens(result.tokens);
   writeUser(result.user);
+  if (result.sessionId) writeSessionId(result.sessionId);
   return result;
 }
 
@@ -128,6 +141,7 @@ export async function login(input) {
   }, false);
   writeTokens(result.tokens);
   writeUser(result.user);
+  if (result.sessionId) writeSessionId(result.sessionId);
   return result;
 }
 
@@ -153,6 +167,7 @@ export async function refreshSession() {
   if (result.user) {
     writeUser(result.user);
   }
+  if (result.sessionId) writeSessionId(result.sessionId);
   updateSocketToken(result.tokens.accessToken);
   return result;
 }
@@ -162,6 +177,19 @@ export async function logout() {
     await request('/api/v3/auth/logout', { method: 'POST' }, false);
   } catch { /* best-effort */ }
   clearTokens();
+  clearSessionId();
+}
+
+export async function getSessions() {
+  return request('/api/v3/auth/sessions');
+}
+
+export async function revokeSession(sessionId) {
+  return request(`/api/v3/auth/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE' });
+}
+
+export async function revokeAllSessions() {
+  return request('/api/v3/auth/sessions', { method: 'DELETE' });
 }
 
 export async function requestChats() {

@@ -17,6 +17,7 @@ import { subscribeSocket, getSocketStatus, onSocketConnect } from '../shared/soc
 import { config } from '../shared/config.js';
 import { getActiveTheme, setTheme } from '../shared/themeStore.js';
 import { initPush, unsubscribePush } from '../shared/pushClient.js';
+import { updateFaviconBadge } from '../shared/faviconBadge.js';
 
 function renderMobileBottomNav(user, mobileTab, totalUnread, canInstall) {
   return `
@@ -94,7 +95,7 @@ function renderAuthenticatedView(user, chatState, peopleState, adminState, activ
         <button class="sidebar-fab" data-role="mobile-tab" data-tab="people" title="New chat" aria-label="Start a new chat">✏</button>
       </aside>
       <main class="thread-area">
-        ${renderChatThreadView({ activeChat: activeChatWithPresence, threadState, composerValue, readOnly: isMonitoring, viewOnce, deleteAfter, reactions, pinnedMessage })}
+        ${renderChatThreadView({ activeChat: activeChatWithPresence, threadState, composerValue, readOnly: isMonitoring, viewOnce, deleteAfter, reactions, pinnedMessage, threadSearch })}
       </main>
     </div>
     ${renderMobileBottomNav(user, activeChat ? '' : mobileTab, totalUnread, canInstall)}
@@ -237,6 +238,7 @@ function renderChatInfoPanel(activeChat, members = null, currentUserId = null) {
             📦 ${activeChat?.archived ? 'Unarchive' : 'Archive'}
           </button>
           <button class="cip-action-btn cip-action-danger" data-role="cip-clear">🗑 Clear Chat</button>
+          ${isGroup && !isGroupAdmin ? `<button class="cip-action-btn cip-action-danger" data-role="cip-leave-group">🚪 Leave Group</button>` : ''}
         </div>
       </div>
     </div>
@@ -418,6 +420,7 @@ export function renderAppShell(root) {
   let searchOpen = false;
   let searchQuery = '';
   let searchResults = null;
+  let threadSearch = null; // { query: '' } when open
   let searchLoading = false;
   let groupModalOpen = false;
   let groupModalState = { step: 'name', title: '', members: [], searchQuery: '', searchResults: [], loading: false, error: '' };
@@ -827,6 +830,7 @@ export function renderAppShell(root) {
     isMonitoring = false;
     reactions = null;
     pinnedMessage = null;
+    threadSearch = null;
     unreadScrollCount = 0;
     activeChat = chatState.items.find((item) => item.chatId === chatId) || null;
     chatThreadStore.openChat(chatId).then(() => {
@@ -1178,6 +1182,8 @@ export function renderAppShell(root) {
       const { viewOnce, deleteAfter } = chatThreadStore.getState();
       const showInstallBanner = !!installPrompt && !installBannerDismissed;
       removeSplash();
+      const _totalUnread = chatState.items.reduce((n, c) => n + (c.unreadCount || 0), 0);
+      updateFaviconBadge(_totalUnread);
       root.innerHTML = renderAuthenticatedView(
         sessionState.user,
         chatState,
@@ -1303,6 +1309,9 @@ export function renderAppShell(root) {
             settingsOpen = false;
             render();
             openStarredOverlay();
+          },
+          onSignOutAll: () => {
+            sessionStore.signOut();
           }
         });
       }
@@ -1412,6 +1421,24 @@ export function renderAppShell(root) {
         isMonitoring,
         currentUserId: sessionState.user?.userId
       });
+
+      // ── Thread search ─────────────────────────────────────────────────────
+      root.querySelector('[data-role="open-thread-search"]')?.addEventListener('click', () => {
+        threadSearch = { query: '' };
+        render();
+        requestAnimationFrame(() => root.querySelector('[data-role="thread-search-input"]')?.focus());
+      });
+      root.querySelector('[data-role="close-thread-search"]')?.addEventListener('click', () => {
+        threadSearch = null;
+        render();
+      });
+      let _threadSearchDebounce = null;
+      root.querySelector('[data-role="thread-search-input"]')?.addEventListener('input', (e) => {
+        threadSearch = { query: e.target.value };
+        clearTimeout(_threadSearchDebounce);
+        _threadSearchDebounce = setTimeout(() => render(), 200);
+      });
+
       bindPeopleView(root, {
         onSearch: (query) => peopleStore.search(query),
         onStartChat: handleStartChat
@@ -1617,6 +1644,20 @@ export function renderAppShell(root) {
                 render();
               } catch { /* silently ignore */ }
             });
+          });
+        });
+
+        root.querySelector('[data-role="cip-leave-group"]')?.addEventListener('click', () => {
+          showConfirm('Leave this group? You will no longer receive messages from it.', async () => {
+            try {
+              const { removeGroupMember } = await import('../shared/apiClient.js');
+              await removeGroupMember(activeChat.chatId, sessionState.user.userId);
+              chatInfoOpen = false;
+              activeChat = null;
+              chatListStore.load();
+              chatThreadStore.reset();
+              render();
+            } catch (err) { showToast(err?.message || 'Could not leave group'); }
           });
         });
 

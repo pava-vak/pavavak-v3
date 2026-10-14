@@ -1955,6 +1955,48 @@ input {
 }
 .thread-header-action:hover { opacity: 1; background: var(--v3-hover); }
 
+/* Thread search bar */
+.thread-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--v3-surface);
+  border-bottom: 1px solid var(--v3-border);
+  flex-shrink: 0;
+}
+.thread-search-input {
+  flex: 1;
+  border: 1px solid var(--v3-border);
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 14px;
+  background: var(--v3-bg);
+  color: var(--v3-text);
+  outline: none;
+}
+.thread-search-input:focus { border-color: var(--v3-accent); }
+.thread-search-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  color: var(--v3-muted);
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.thread-search-close:hover { background: var(--v3-hover); }
+.thread-search-count {
+  font-size: 12px;
+  color: var(--v3-muted);
+  white-space: nowrap;
+}
+.thread-search-empty {
+  text-align: center;
+  padding: 40px 20px;
+}
+.thread-header-action.active { opacity: 1; color: var(--v3-accent); }
+
 /* Date separator */
 .date-separator {
   display: flex;
@@ -2886,6 +2928,23 @@ html, body { height: 100%; overscroll-behavior: none; }
 .ob-perm-label { font-size: 14px; font-weight: 600; color: var(--v3-text); }
 .ob-perm-desc  { font-size: 12px; color: var(--v3-muted); }
 .ob-perm-check { width: 18px; height: 18px; accent-color: var(--v3-accent); flex-shrink: 0; cursor: pointer; }
+
+/* ── Settings: Linked Devices ────────────────────────────────────────── */
+.settings-sessions-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.settings-session-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 10px 12px; border-radius: 8px;
+  background: var(--v3-hover);
+}
+.settings-session-current { border: 1px solid var(--v3-accent); }
+.settings-session-info { display: flex; flex-direction: column; gap: 2px; }
+.settings-session-device { font-size: 14px; font-weight: 600; color: var(--v3-text); }
+.settings-session-meta { font-size: 12px; color: var(--v3-muted); }
+.settings-session-badge {
+  display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px;
+  border-radius: 10px; background: var(--v3-accent); color: #fff;
+  margin-left: 6px; vertical-align: middle;
+}
 
 /* ── Settings: App Lock row ──────────────────────────────────────────── */
 .settings-lock-row {

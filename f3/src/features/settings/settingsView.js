@@ -1,5 +1,5 @@
 import { escapeHtml } from '../../shared/html.js';
-import { changePassword } from '../../shared/apiClient.js';
+import { changePassword, getSessions, revokeSession, revokeAllSessions } from '../../shared/apiClient.js';
 import { isEnabled as isLockEnabled, hasPin, getLockTimer } from '../../shared/biometricLock.js';
 import { THEMES, getActiveTheme, setTheme } from '../../shared/themeStore.js';
 
@@ -166,6 +166,17 @@ export function renderSettingsModal(user = {}, biometricEnrolled = false) {
             <button class="secondary-button" style="margin-top:8px" data-role="view-starred">⭐ View Starred Messages</button>
           </section>
 
+          <section class="settings-section" id="settings-sessions-section">
+            <h3 class="settings-section-title">Linked Devices</h3>
+            <p class="settings-section-sub">Devices currently signed in to your account.</p>
+            <div id="settings-sessions-list" class="settings-sessions-list">
+              <p class="muted" style="font-size:13px">Loading…</p>
+            </div>
+            <div style="margin-top:10px">
+              <button class="settings-lock-btn settings-lock-btn--off" data-role="sign-out-all-devices" style="width:auto;padding:6px 16px">🚫 Sign Out All Devices</button>
+            </div>
+          </section>
+
           <section class="settings-section">
             <h3 class="settings-section-title">Change Password</h3>
             <p class="settings-section-sub">Enter your current password to set a new one.</p>
@@ -208,8 +219,62 @@ export function renderSettingsModal(user = {}, biometricEnrolled = false) {
   `;
 }
 
-export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onEnableBiometric, onRevokeBiometric, onDisableLock, onSetPin, onRemovePin, onSetLockTimer, onLockNow, onViewStarred }) {
+function renderSessionRow(s) {
+  const lastSeen = s.last_used_at
+    ? new Date(s.last_used_at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : 'Never';
+  return `
+    <div class="settings-session-row ${s.isCurrent ? 'settings-session-current' : ''}">
+      <div class="settings-session-info">
+        <span class="settings-session-device">${escapeHtml(s.device_name || 'Unknown')}${s.isCurrent ? ' <span class="settings-session-badge">This device</span>' : ''}</span>
+        <span class="settings-session-meta">${escapeHtml(s.ip_address || '')} · Last active ${lastSeen}</span>
+      </div>
+      ${!s.isCurrent ? `<button class="settings-lock-btn settings-lock-btn--off" data-role="revoke-session" data-session-id="${escapeHtml(s.id)}" style="white-space:nowrap">Sign out</button>` : ''}
+    </div>
+  `;
+}
+
+async function loadSessions(root) {
+  const listEl = root.querySelector('#settings-sessions-list');
+  if (!listEl) return;
+  try {
+    const { sessions: list } = await getSessions();
+    if (!list?.length) {
+      listEl.innerHTML = '<p class="muted" style="font-size:13px">No active sessions found.</p>';
+      return;
+    }
+    listEl.innerHTML = list.map(renderSessionRow).join('');
+    listEl.querySelectorAll('[data-role="revoke-session"]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const sid = btn.dataset.sessionId;
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+          await revokeSession(sid);
+          btn.closest('.settings-session-row')?.remove();
+        } catch {
+          btn.disabled = false;
+          btn.textContent = 'Sign out';
+        }
+      });
+    });
+  } catch {
+    listEl.innerHTML = '<p class="muted" style="font-size:13px">Could not load sessions.</p>';
+  }
+}
+
+export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onEnableBiometric, onRevokeBiometric, onDisableLock, onSetPin, onRemovePin, onSetLockTimer, onLockNow, onViewStarred, onSignOutAll }) {
   root.querySelector('[data-role="settings-close"]')?.addEventListener('click', onClose);
+
+  loadSessions(root);
+
+  root.querySelector('[data-role="sign-out-all-devices"]')?.addEventListener('click', async () => {
+    if (!confirm('Sign out from all devices? You will be signed out here too.')) return;
+    try {
+      await revokeAllSessions();
+      onSignOutAll?.();
+    } catch { /* handled by session expiry */ }
+  });
 
   root.querySelector('[data-role="view-starred"]')?.addEventListener('click', () => {
     onViewStarred?.();
