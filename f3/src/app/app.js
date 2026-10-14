@@ -483,7 +483,7 @@ export function renderAppShell(root) {
       const newH = _updateVH();
       if (newH < _prevVpHeight - 50 && activeChat) {
         const c = root.querySelector('[data-role="thread-messages"]');
-        if (c) requestAnimationFrame(() => c.scrollTo({ top: c.scrollHeight, behavior: 'instant' }));
+        if (c) requestAnimationFrame(() => requestAnimationFrame(() => c.scrollTo({ top: c.scrollHeight, behavior: 'instant' })));
       }
       _prevVpHeight = newH;
     });
@@ -746,6 +746,23 @@ export function renderAppShell(root) {
     }
   }
 
+  function _doScroll(container) {
+    // Double-rAF: first frame commits DOM, second fires after layout is computed
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'instant' });
+    }));
+    // Re-scroll after any images in the thread finish loading (they inflate scrollHeight)
+    container.querySelectorAll('img:not([data-scroll-watched])').forEach(img => {
+      img.dataset.scrollWatched = '1';
+      if (!img.complete) {
+        img.addEventListener('load', () => {
+          const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
+          if (atBottom) container.scrollTo({ top: container.scrollHeight, behavior: 'instant' });
+        }, { once: true });
+      }
+    });
+  }
+
   function scrollThreadToBottom() {
     const container = root.querySelector('[data-role="thread-messages"]');
     if (!container) return;
@@ -761,16 +778,12 @@ export function renderAppShell(root) {
       unreadScrollCount = 0;
       syncScrollBtn(false);
       _loadingMore = false;
-      requestAnimationFrame(() => {
-        container.scrollTo({ top: container.scrollHeight, behavior: 'instant' });
-      });
+      _doScroll(container);
     } else if (newItems && !_loadingMore) {
       // New messages sent/received → always scroll to bottom
       unreadScrollCount = 0;
       syncScrollBtn(false);
-      requestAnimationFrame(() => {
-        container.scrollTo({ top: container.scrollHeight, behavior: 'instant' });
-      });
+      _doScroll(container);
     }
     // If _loadingMore (loading older messages), don't scroll — let the browser
     // stay at the top of the newly loaded batch so the user can read them.
