@@ -102,7 +102,7 @@ function registerBiometricRoutes(app) {
     const options = await generateRegistrationOptions({
       rpName: 'PaVa Vak',
       rpID: rpId,
-      userID: String(userId),
+      userID: Buffer.from(String(userId)),
       userName: username,
       userDisplayName: displayName,
       attestation: 'none',
