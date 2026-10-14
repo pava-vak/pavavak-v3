@@ -447,3 +447,23 @@ export async function subscribePushEndpoint(subscription) {
 export async function unsubscribePushEndpoint(endpoint) {
   return request('/api/v3/push/subscribe', { method: 'DELETE', body: JSON.stringify({ endpoint }) });
 }
+
+// ── Biometric ──────────────────────────────────────────────────────────────────
+export async function biometricStatus() {
+  return request('/api/v3/auth/biometric/status');
+}
+export async function biometricEnrollStart() {
+  return request('/api/v3/auth/biometric/enroll/start', { method: 'POST' });
+}
+export async function biometricEnrollFinish(credential) {
+  return request('/api/v3/auth/biometric/enroll/finish', { method: 'POST', body: JSON.stringify(credential) });
+}
+export async function biometricVerifyStart() {
+  return request('/api/v3/auth/biometric/verify/start', { method: 'POST' });
+}
+export async function biometricVerifyFinish(assertion) {
+  return request('/api/v3/auth/biometric/verify/finish', { method: 'POST', body: JSON.stringify(assertion) });
+}
+export async function biometricRevoke() {
+  return request('/api/v3/auth/biometric', { method: 'DELETE' });
+}

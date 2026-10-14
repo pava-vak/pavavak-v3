@@ -12,7 +12,7 @@ function getLockScreenPrefs() {
   };
 }
 
-export function renderSettingsModal(user = {}) {
+export function renderSettingsModal(user = {}, biometricEnrolled = false) {
   const displayName = user.displayName || '';
   const username = user.username || '';
   const lockEnabled = isLockEnabled();
@@ -52,6 +52,13 @@ export function renderSettingsModal(user = {}) {
             <div id="settings-lock-success" class="settings-success" role="status" style="display:none"></div>
 
             <div class="settings-lock-row">
+              <span class="settings-lock-label">${biometricEnrolled ? '🔐 Biometric ON' : '🔐 Biometric OFF'}</span>
+              ${biometricEnrolled
+                ? `<button class="settings-lock-btn settings-lock-btn--off" data-role="revoke-biometric">Remove</button>`
+                : `<button class="settings-lock-btn settings-lock-btn--on" data-role="enable-biometric">Enable</button>`
+              }
+            </div>
+            <div class="settings-lock-row" style="margin-top:8px">
               <span class="settings-lock-label">${pinEnabled ? '🔢 PIN ON' : '🔢 PIN OFF'}</span>
               <div style="display:flex;gap:6px">
                 ${pinEnabled
@@ -201,7 +208,7 @@ export function renderSettingsModal(user = {}) {
   `;
 }
 
-export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onDisableLock, onSetPin, onRemovePin, onSetLockTimer, onLockNow, onViewStarred }) {
+export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onEnableBiometric, onRevokeBiometric, onDisableLock, onSetPin, onRemovePin, onSetLockTimer, onLockNow, onViewStarred }) {
   root.querySelector('[data-role="settings-close"]')?.addEventListener('click', onClose);
 
   root.querySelector('[data-role="view-starred"]')?.addEventListener('click', () => {
@@ -246,6 +253,30 @@ export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onDisabl
     el.textContent = msg;
     el.style.display = 'block';
   }
+
+  root.querySelector('[data-role="enable-biometric"]')?.addEventListener('click', async () => {
+    if (lockErrorEl) lockErrorEl.style.display = 'none';
+    if (lockSuccessEl) lockSuccessEl.style.display = 'none';
+    try {
+      await onEnableBiometric?.();
+      showLockMsg(lockSuccessEl, '🔐 Biometric enabled.');
+    } catch (err) {
+      if (!err.message?.includes('cancelled')) {
+        showLockMsg(lockErrorEl, err.message || 'Could not enable biometric.');
+      }
+    }
+  });
+
+  root.querySelector('[data-role="revoke-biometric"]')?.addEventListener('click', async () => {
+    if (lockErrorEl) lockErrorEl.style.display = 'none';
+    if (lockSuccessEl) lockSuccessEl.style.display = 'none';
+    try {
+      await onRevokeBiometric?.();
+      showLockMsg(lockSuccessEl, '🔐 Biometric removed.');
+    } catch (err) {
+      showLockMsg(lockErrorEl, err.message || 'Could not remove biometric.');
+    }
+  });
 
   root.querySelector('[data-role="disable-lock"]')?.addEventListener('click', () => {
     onDisableLock?.();

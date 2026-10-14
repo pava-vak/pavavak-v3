@@ -11,7 +11,7 @@ import { createAdminStore } from '../features/admin/adminStore.js';
 import { bindAdminView, renderAdminView, renderAddUserModal, bindAddUserModal } from '../features/admin/adminView.js';
 import { renderSettingsModal, bindSettingsModal } from '../features/settings/settingsView.js';
 import { renderOnboarding, requestPermissions } from '../features/onboarding/onboardingView.js';
-import { isEnabled as isLockEnabled, disable as disableLock, setPin, verifyPin, hasPin, clearPin, getLockTimer, setLockTimer } from '../shared/biometricLock.js';
+import { isEnabled as isLockEnabled, disable as disableLock, setPin, verifyPin, hasPin, clearPin, getLockTimer, setLockTimer, isSupported as isBiometricSupported, isPlatformAvailable, hasEnrolledLocally, checkEnrolled, enroll, verify, revoke as revokeBiometric } from '../shared/biometricLock.js';
 import { playMessageTone } from '../shared/notificationSound.js';
 import { subscribeSocket, getSocketStatus, onSocketConnect } from '../shared/socketClient.js';
 import { config } from '../shared/config.js';
@@ -268,6 +268,14 @@ function renderGlobalSearch(query = '', results = null, loading = false) {
   `;
 }
 
+const FINGERPRINT_SVG = `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="36" height="36">
+  <path d="M17 22c0-3.87 3.13-7 7-7s7 3.13 7 7c0 4-1.5 8-3.5 11"/>
+  <path d="M13 22c0-6.07 4.93-11 11-11s11 4.93 11 11c0 5.5-2 10.5-5 15"/>
+  <path d="M9 22c0-8.28 6.72-15 15-15s15 6.72 15 15c0 7-2.5 13.5-6.5 19"/>
+  <path d="M21 22c0-1.66 1.34-3 3-3s3 1.34 3 3c0 2.5-0.8 5-2 7"/>
+  <path d="M14 16c2.5-3.5 6-5.5 10-5.5"/>
+</svg>`;
+
 function getLockScreenName() {
   return localStorage.getItem('pava-lock-name') || 'PaVa Vak';
 }
@@ -276,7 +284,7 @@ function getLockScreenIcon() {
   return localStorage.getItem('pava-lock-icon') || null; // null = use initial letter
 }
 
-function renderLockScreen(error = '', pinEntry = '') {
+function renderLockScreen(error = '', pinEntry = '', showPin = false, biometricEnrolled = false) {
   const lockName = getLockScreenName();
   const lockIcon = getLockScreenIcon();
   const initial = escapeHtml(lockName.trim().slice(0, 1).toUpperCase() || 'P');
@@ -293,29 +301,54 @@ function renderLockScreen(error = '', pinEntry = '') {
     </div>
   `;
 
-  const dots = Array.from({ length: 4 }, (_, i) =>
-    `<span class="pin-dot ${i < pinEntry.length ? 'filled' : ''}"></span>`
-  ).join('');
+  if (!biometricEnrolled || showPin) {
+    const dots = Array.from({ length: 4 }, (_, i) =>
+      `<span class="pin-dot ${i < pinEntry.length ? 'filled' : ''}"></span>`
+    ).join('');
+    return `
+      <div class="app-lock-screen">
+        <button class="app-refresh-btn app-refresh-btn--lock" type="button" data-role="app-refresh" title="Check for update &amp; reload">🔄</button>
+        ${lockIdentity}
+        <div class="app-lock-pin-zone">
+          <p class="app-lock-pin-label">Enter Passcode</p>
+          ${error ? `<p class="app-lock-error" role="alert">${escapeHtml(error)}</p>` : ''}
+          <div class="app-pin-dots" data-role="pin-dots">${dots}</div>
+          <input
+            class="pin-native-input"
+            data-role="pin-native-input"
+            type="password"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            maxlength="4"
+            autocomplete="off"
+            aria-label="Enter 4-digit PIN"
+          />
+        </div>
+        <div class="app-lock-links">
+          ${biometricEnrolled ? `<button class="app-lock-link" data-role="use-biometric">Use Fingerprint</button>` : ''}
+          <button class="app-lock-signout" data-role="lock-signout">Sign out</button>
+        </div>
+      </div>
+    `;
+  }
+
+  // Biometric screen — fingerprint circle auto-fires on mount, tap to retry
+  const bioState = error ? 'bio-error' : 'bio-idle';
   return `
     <div class="app-lock-screen">
       <button class="app-refresh-btn app-refresh-btn--lock" type="button" data-role="app-refresh" title="Check for update &amp; reload">🔄</button>
       ${lockIdentity}
-      <div class="app-lock-pin-zone">
-        <p class="app-lock-pin-label">Enter Passcode</p>
-        ${error ? `<p class="app-lock-error" role="alert">${escapeHtml(error)}</p>` : ''}
-        <div class="app-pin-dots" data-role="pin-dots">${dots}</div>
-        <input
-          class="pin-native-input"
-          data-role="pin-native-input"
-          type="password"
-          inputmode="numeric"
-          pattern="[0-9]*"
-          maxlength="4"
-          autocomplete="off"
-          aria-label="Enter 4-digit PIN"
-        />
+      <div class="app-lock-bio-zone">
+        <button class="app-lock-bio-btn ${bioState}" data-role="retry-bio" aria-label="Verify with fingerprint or Face ID">
+          ${FINGERPRINT_SVG}
+        </button>
+        ${error
+          ? `<p class="app-lock-error" role="alert">${escapeHtml(error)}</p>`
+          : `<p class="app-lock-bio-hint">Touch to unlock</p>`
+        }
       </div>
       <div class="app-lock-links">
+        ${hasPin() ? `<button class="app-lock-link" data-role="show-pin">Use Passcode</button>` : ''}
         <button class="app-lock-signout" data-role="lock-signout">Sign out</button>
       </div>
     </div>
@@ -398,6 +431,46 @@ export function renderAppShell(root) {
   let lockError = '';
   let onboarding = null;
   let lockPinEntry = '';
+  let lockShowPin = false;
+  let biometricEnrolled = hasEnrolledLocally();
+  let biometricFiring = false;
+
+  // Refresh server-side enrollment status (async, non-blocking)
+  if (isBiometricSupported()) {
+    checkEnrolled().then(enrolled => {
+      biometricEnrolled = enrolled;
+      if (appLocked && sessionState.status === 'authenticated') render();
+    }).catch(() => {});
+  }
+
+  function fireBiometric() {
+    if (biometricFiring) return;
+    biometricFiring = true;
+    lockError = '';
+    verify().then(() => {
+      biometricFiring = false;
+      appLocked = false; lockPinEntry = ''; lockError = ''; lockShowPin = false;
+      render();
+    }).catch(err => {
+      biometricFiring = false;
+      lockError = err.message?.includes('cancelled') ? '' : (err.message || 'Biometric failed');
+      render();
+    });
+  }
+
+  // Auto-fire biometric on load if enrolled
+  if (appLocked && biometricEnrolled) {
+    biometricFiring = true;
+    verify().then(() => {
+      biometricFiring = false;
+      appLocked = false; lockPinEntry = ''; lockError = ''; lockShowPin = false;
+      if (sessionState.status === 'authenticated') render();
+    }).catch(err => {
+      biometricFiring = false;
+      lockError = err.message?.includes('cancelled') ? '' : (err.message || 'Biometric failed');
+      if (sessionState.status === 'authenticated') render();
+    });
+  }
 
   let _prevVpHeight = 0;
   function _updateVH() {
@@ -458,11 +531,13 @@ export function renderAppShell(root) {
     const timer = getLockTimer();
     if (document.hidden) {
       sessionStorage.setItem('pava-last-active', Date.now().toString());
+      biometricFiring = false;
       lockError = '';
       if (timer === 0) {
         appLocked = true;
         lockPinEntry = '';
         lockError = '';
+        lockShowPin = false;
         closeAllForLock();
       }
       ensureSplash();
@@ -475,11 +550,15 @@ export function renderAppShell(root) {
           appLocked = true;
           lockPinEntry = '';
           lockError = '';
+          lockShowPin = false;
           closeAllForLock();
         }
       }
 
       if (appLocked) {
+        if (biometricEnrolled && !biometricFiring && !lockShowPin) {
+          fireBiometric();
+        }
         if (sessionState.status === 'authenticated') render();
       } else {
         removeSplash();
@@ -934,8 +1013,19 @@ export function renderAppShell(root) {
     }
 
     if (appLocked && sessionState.status === 'authenticated') {
-      root.innerHTML = renderLockScreen(lockError, lockPinEntry);
+      // Hold render while biometric is auto-firing (no UI flash)
+      if (biometricEnrolled && biometricFiring && !lockShowPin && !lockError) return;
+
+      root.innerHTML = renderLockScreen(lockError, lockPinEntry, lockShowPin, biometricEnrolled);
       removeSplash();
+
+      root.querySelector('[data-role="retry-bio"]')?.addEventListener('click', fireBiometric);
+      root.querySelector('[data-role="show-pin"]')?.addEventListener('click', () => {
+        lockShowPin = true; lockError = ''; lockPinEntry = ''; render();
+      });
+      root.querySelector('[data-role="use-biometric"]')?.addEventListener('click', () => {
+        lockShowPin = false; lockError = ''; lockPinEntry = ''; fireBiometric();
+      });
 
       const pinInput = root.querySelector('[data-role="pin-native-input"]');
       if (pinInput) {
@@ -957,7 +1047,7 @@ export function renderAppShell(root) {
             pinInput.disabled = true;
             try {
               await verifyPin(pinInput.value);
-              appLocked = false; lockPinEntry = ''; lockError = '';
+              appLocked = false; lockPinEntry = ''; lockError = ''; lockShowPin = false;
               render();
             } catch {
               const dotsEl = root.querySelector('[data-role="pin-dots"]');
@@ -972,6 +1062,7 @@ export function renderAppShell(root) {
       root.querySelector('[data-role="lock-signout"]')?.addEventListener('click', () => {
         appLocked = false;
         lockPinEntry = '';
+        lockShowPin = false;
         sessionStore.signOut();
       });
       root.querySelector('[data-role="app-refresh"]')?.addEventListener('click', () => {
@@ -988,12 +1079,22 @@ export function renderAppShell(root) {
       root.querySelector('[data-role="ob-skip"]')?.addEventListener('click', () => {
         const { step } = onboarding;
         if (step === 'welcome') { onboarding = null; localStorage.setItem('pava-onboarded', '1'); render(); return; }
-        if (step === 'pin')     { onboarding = { ...onboarding, step: 'permissions', pinFirst: '', pinEntry: '', error: '' }; render(); return; }
+        if (step === 'pin')     { onboarding = { ...onboarding, step: biometricEnrolled ? 'permissions' : 'biometric', pinFirst: '', pinEntry: '', error: '' }; render(); return; }
+        if (step === 'biometric') { onboarding = { ...onboarding, step: 'permissions', error: '' }; render(); return; }
         if (step === 'permissions') { localStorage.setItem('pava-onboarded', '1'); onboarding = { ...onboarding, step: 'done' }; render(); return; }
       });
 
       root.querySelector('[data-role="ob-next"]')?.addEventListener('click', () => {
         onboarding = { ...onboarding, step: 'pin', pinFirst: '', pinEntry: '', error: '' };
+        render();
+      });
+
+      root.querySelector('[data-role="ob-biometric"]')?.addEventListener('click', async () => {
+        try {
+          await enroll();
+          biometricEnrolled = true;
+        } catch { /* user cancelled or not supported */ }
+        onboarding = { ...onboarding, step: 'permissions', error: '' };
         render();
       });
 
@@ -1034,7 +1135,7 @@ export function renderAppShell(root) {
               // Confirm — check match
               if (pinEntry === pinFirst) {
                 await setPin(pinEntry);
-                onboarding = { ...onboarding, step: 'permissions', pinFirst: '', pinEntry: '', error: '' };
+                onboarding = { ...onboarding, step: 'biometric', pinFirst: '', pinEntry: '', error: '' };
                 render();
               } else {
                 // Mismatch — shake and reset
@@ -1080,7 +1181,7 @@ export function renderAppShell(root) {
         onlineUserIds,
         reactions,
         pinnedMessage
-      ) + (settingsOpen ? renderSettingsModal(sessionState.user) : '')
+      ) + (settingsOpen ? renderSettingsModal(sessionState.user, biometricEnrolled) : '')
         + (showInstallBanner ? renderInstallBanner() : '')
         + (searchOpen ? renderGlobalSearch(searchQuery, searchResults, searchLoading) : '')
         + (groupModalOpen ? renderGroupCreateModal(groupModalState) : '')
@@ -1150,8 +1251,19 @@ export function renderAppShell(root) {
             await sessionStore.updateDisplayName(displayName);
             render();
           },
+          onEnableBiometric: async () => {
+            await enroll();
+            biometricEnrolled = true;
+            render();
+          },
+          onRevokeBiometric: async () => {
+            await revokeBiometric();
+            biometricEnrolled = false;
+            render();
+          },
           onDisableLock: () => {
             disableLock();
+            biometricEnrolled = false;
             render();
           },
           onSetPin: async (pin) => {
@@ -1170,6 +1282,7 @@ export function renderAppShell(root) {
             appLocked = true;
             lockPinEntry = '';
             lockError = '';
+            lockShowPin = false;
             settingsOpen = false;
             render();
           },

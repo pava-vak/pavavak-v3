@@ -15,6 +15,8 @@ const { registerAdminRoutes } = require('../modules/admin/admin.routes');
 const { registerPushRoutes } = require('../modules/notifications/push.routes');
 const { registerMediaRoutes } = require('../modules/media/media.routes');
 const { registerFeatureRoutes } = require('../modules/features/features.routes');
+const { registerBiometricRoutes } = require('../modules/biometric/biometric.routes');
+const biometricRepo = require('../modules/biometric/biometric.repository');
 
 function buildApp() {
   const app = Fastify({
@@ -70,6 +72,7 @@ function buildApp() {
     registerPushRoutes(instance);
     registerMediaRoutes(instance);
     registerFeatureRoutes(instance);
+    registerBiometricRoutes(instance);
   });
 
   app.setErrorHandler((error, request, reply) => {

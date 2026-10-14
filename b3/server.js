@@ -5,6 +5,7 @@ const { attachSocketServer } = require('./src/realtime/socketServer');
 const { closePool } = require('./src/db/pool');
 const scheduledMessages = require('./src/jobs/scheduledMessages');
 const autoDelete = require('./src/jobs/autoDelete');
+const biometricRepo = require('./src/modules/biometric/biometric.repository');
 
 let app;
 let io;
@@ -17,6 +18,7 @@ async function start() {
   const port = env.PORT;
   await app.listen({ port, host: '0.0.0.0' });
   app.log.info({ port }, 'b3 listening');
+  await biometricRepo.ensureTable();
   scheduledMessages.start();
   autoDelete.start();
 }
