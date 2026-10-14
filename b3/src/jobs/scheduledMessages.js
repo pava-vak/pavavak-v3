@@ -75,7 +75,8 @@ async function runOnce() {
         senderDisplayName: row.display_name
       };
       realtime.emitMessageNewToMembers(auth, row.conversation_id, message, memberIds);
-    } catch {
+    } catch (err) {
+      console.error('[scheduledMessages] failed to send message', row.id, err.message);
       try { await client.query('rollback'); } catch {}
     } finally {
       client.release();

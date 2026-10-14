@@ -418,10 +418,7 @@ async function appendOutgoingMessage(user, chatId, text, messageId = null, { vie
   return message;
 }
 
-function directConversationId(firstUserId, secondUserId) {
-  const ids = [Number(firstUserId), Number(secondUserId)].sort((a, b) => a - b);
-  return `direct::${ids[0]}:${ids[1]}`;
-}
+const { directChatId: directConversationId } = require('../shared/chatIds');
 
 async function createDirectConversation(user, otherUserId) {
   await ensureUser(user);

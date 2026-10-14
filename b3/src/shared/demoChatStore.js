@@ -72,10 +72,7 @@ function ensureChatForUser(userId, chatId, fallbackTitle) {
   return { store, chat };
 }
 
-function directChatId(firstUserId, secondUserId) {
-  const ids = [Number(firstUserId), Number(secondUserId)].sort((a, b) => a - b);
-  return `direct::${ids[0]}:${ids[1]}`;
-}
+const { directChatId } = require('./chatIds');
 
 function createDirectConversation(user, otherUserId) {
   if (Number(otherUserId) === Number(user.userId)) {

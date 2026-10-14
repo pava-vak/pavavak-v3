@@ -115,8 +115,7 @@ function registerFeatureRoutes(app) {
       if (existing.rows[0]?.emoji === emoji) {
         await db.query('delete from v3_message_reactions where message_id=$1 and user_id=$2',
           [request.params.messageId, request.auth.userId]);
-        const payload = { messageId: request.params.messageId, chatId: msg.conversation_id, userId: request.auth.userId, emoji: null };
-        memberIds.forEach(id => realtime.emitToUser(id, 'message:reaction', payload));
+        realtime.emitReactionToMembers(msg.conversation_id, request.params.messageId, request.auth.userId, null, null, memberIds);
         return { success: true, removed: true };
       }
       await db.query(
@@ -124,9 +123,7 @@ function registerFeatureRoutes(app) {
          on conflict(message_id,user_id) do update set emoji=$3, created_at=now()`,
         [request.params.messageId, request.auth.userId, emoji]
       );
-      const payload = { messageId: request.params.messageId, chatId: msg.conversation_id,
-        userId: request.auth.userId, displayName: request.auth.displayName, emoji };
-      memberIds.forEach(id => realtime.emitToUser(id, 'message:reaction', payload));
+      realtime.emitReactionToMembers(msg.conversation_id, request.params.messageId, request.auth.userId, request.auth.displayName, emoji, memberIds);
       return { success: true, emoji };
     } catch (err) {
       return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
@@ -191,8 +188,7 @@ function registerFeatureRoutes(app) {
         [text, request.params.messageId]
       );
       const memberIds = await getMemberIds(db, msg.conversation_id);
-      const payload = { chatId: msg.conversation_id, messageId: request.params.messageId, text, editedAt: new Date().toISOString() };
-      memberIds.forEach(id => realtime.emitToUser(id, 'message:edited', payload));
+      realtime.emitMessageEditedToMembers(msg.conversation_id, request.params.messageId, text, new Date().toISOString(), memberIds);
       return { success: true };
     } catch (err) {
       return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });

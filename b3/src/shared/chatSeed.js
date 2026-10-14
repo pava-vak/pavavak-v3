@@ -3,10 +3,7 @@ const DEMO_CONTACT_A = 9001; // "Alex" demo contact
 const DEMO_CONTACT_B = 9002; // "Books" demo contact
 const DEMO_CHANNEL   = 9003; // system channel user
 
-function directId(a, b) {
-  const [lo, hi] = [Number(a), Number(b)].sort((x, y) => x - y);
-  return `direct::${lo}:${hi}`;
-}
+const { directChatId: directId } = require('./chatIds');
 
 function createSeedState(user) {
   const uid = user.userId;

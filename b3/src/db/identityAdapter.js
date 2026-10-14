@@ -25,7 +25,7 @@ async function findByUsername(username) {
 }
 
 async function getById(userId) {
-  return store().getById ? store().getById(userId) : null;
+  return store().getById(userId);
 }
 
 async function createUser(input) {

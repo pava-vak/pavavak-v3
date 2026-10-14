@@ -213,27 +213,24 @@ function openMediaViewer({ mediaList, startIndex, onDelete }) {
     if (now - lastTap < 280) {
       if (vid.style.display === 'none') { scale = scale > 1 ? 1 : 2.5; clamp(); applyTransform(); }
     } else if (scale <= 1 && e.target === stage) {
-      overlay.remove();
+      closeViewer();
     }
     lastTap = now;
   });
 
-  overlay.querySelector('.img-viewer-close').addEventListener('click', () => overlay.remove());
-
-  const onKey = (e) => {
-    if (e.key === 'Escape') { overlay.remove(); return; }
+  function closeViewer() {
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('mouseup', onMouseUp);
+    window.removeEventListener('keydown', onKey);
+    overlay.remove();
+  }
+  function onKey(e) {
+    if (e.key === 'Escape') { closeViewer(); return; }
     if (e.key === 'ArrowLeft')  { if (currentIndex > 0) showItem(currentIndex - 1); }
     if (e.key === 'ArrowRight') { if (currentIndex < mediaList.length - 1) showItem(currentIndex + 1); }
-  };
+  }
   window.addEventListener('keydown', onKey);
-  new MutationObserver((_, obs) => {
-    if (!document.getElementById('pava-img-viewer')) {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-      window.removeEventListener('keydown', onKey);
-      obs.disconnect();
-    }
-  }).observe(document.body, { childList: true });
+  overlay.querySelector('.img-viewer-close').addEventListener('click', closeViewer);
 
   document.body.appendChild(overlay);
   showItem(startIndex);

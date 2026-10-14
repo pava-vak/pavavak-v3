@@ -31,7 +31,7 @@ async function runOnce() {
         chatId: row.conversation_id,
         messageId: row.message_id
       }));
-    } catch { /* skip failed row, try next */ }
+    } catch (err) { console.error('[autoDelete] failed to delete message', row.message_id, err.message); }
   }
 }
 

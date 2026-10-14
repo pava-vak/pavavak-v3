@@ -836,29 +836,25 @@ function openImageViewer(allFileIds, startIdx) {
       scale = scale > 1 ? 1 : 2.5;
       clamp(); applyTransform();
     } else if (scale <= 1 && e.target === stage) {
-      overlay.remove();
+      closeViewer();
     }
     lastTap = now;
   });
 
-  // ── Keyboard ─────────────────────────────────────────────────────────
-  const onKey = (e) => {
-    if (e.key === 'Escape')       overlay.remove();
+  // ── Keyboard + cleanup ───────────────────────────────────────────────
+  function closeViewer() {
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('mouseup', onMouseUp);
+    window.removeEventListener('keydown', onKey);
+    overlay.remove();
+  }
+  function onKey(e) {
+    if (e.key === 'Escape')       closeViewer();
     if (e.key === 'ArrowRight')   goNext();
     if (e.key === 'ArrowLeft')    goPrev();
-  };
+  }
   window.addEventListener('keydown', onKey);
-
-  // ── Cleanup on close ─────────────────────────────────────────────────
-  overlay.querySelector('.img-viewer-close').addEventListener('click', () => overlay.remove());
-  new MutationObserver((_, obs) => {
-    if (!document.getElementById('pava-img-viewer')) {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-      window.removeEventListener('keydown', onKey);
-      obs.disconnect();
-    }
-  }).observe(document.body, { childList: true });
+  overlay.querySelector('.img-viewer-close').addEventListener('click', closeViewer);
 
   // ── Save current image ────────────────────────────────────────────────
   overlay.querySelector('.img-viewer-save').addEventListener('click', async (e) => {
