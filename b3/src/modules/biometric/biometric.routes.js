@@ -96,13 +96,13 @@ function registerBiometricRoutes(app) {
 
     const existing = await repo.getCredential(userId);
     const excludeCredentials = existing
-      ? [{ id: Buffer.from(existing.credential_id, 'base64url'), type: 'public-key', transports: existing.transports }]
+      ? [{ id: existing.credential_id, type: 'public-key', transports: existing.transports }]
       : [];
 
     const options = await generateRegistrationOptions({
       rpName: 'PaVa Vak',
       rpID: rpId,
-      userID: Buffer.from(String(userId)),
+      userID: String(userId),
       userName: username,
       userDisplayName: displayName,
       attestation: 'none',
@@ -189,7 +189,7 @@ function registerBiometricRoutes(app) {
     const options = await generateAuthenticationOptions({
       rpID: getRpId(request),
       allowCredentials: [{
-        id: Buffer.from(cred.credential_id, 'base64url'),
+        id: cred.credential_id,
         type: 'public-key',
         transports: cred.transports?.length ? cred.transports : ['internal']
       }],
