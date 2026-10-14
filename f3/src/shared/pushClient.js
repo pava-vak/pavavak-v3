@@ -1,4 +1,4 @@
-import { apiRequest } from './apiClient.js';
+import { fetchVapidPublicKey, subscribePushEndpoint, unsubscribePushEndpoint } from './apiClient.js';
 
 let _registration = null;
 
@@ -23,7 +23,7 @@ export async function initPush() {
 
   try {
     // Fetch VAPID public key from backend
-    const { publicKey } = await apiRequest('/api/v3/push/vapid-public-key', { method: 'GET' });
+    const { publicKey } = await fetchVapidPublicKey();
     if (!publicKey) return;
 
     // Check if already subscribed
@@ -50,10 +50,7 @@ export async function initPush() {
 
 async function syncSubscription(subscription) {
   try {
-    await apiRequest('/api/v3/push/subscribe', {
-      method: 'POST',
-      body: JSON.stringify(subscription.toJSON())
-    });
+    await subscribePushEndpoint(subscription.toJSON());
   } catch {
     // Ignore — will retry on next session
   }
@@ -64,10 +61,7 @@ export async function unsubscribePush() {
   try {
     const sub = await _registration.pushManager.getSubscription();
     if (!sub) return;
-    await apiRequest('/api/v3/push/subscribe', {
-      method: 'DELETE',
-      body: JSON.stringify({ endpoint: sub.endpoint })
-    });
+    await unsubscribePushEndpoint(sub.endpoint);
     await sub.unsubscribe();
   } catch {
     // Ignore

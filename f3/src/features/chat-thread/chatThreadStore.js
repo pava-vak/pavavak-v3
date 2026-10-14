@@ -1,5 +1,6 @@
 import { markChatRead, markDelivered, openViewOnceMessage, requestAdminThread, requestClearChat, requestDeleteMessage, requestThread, sendMessage } from '../../shared/apiClient.js';
 import { emitTypingStart, emitTypingStop, joinChat } from '../../shared/socketClient.js';
+import { createStore } from '../../shared/createStore.js';
 
 export function createChatThreadStore() {
   let state = {
@@ -19,14 +20,9 @@ export function createChatThreadStore() {
 
   let openGeneration = 0;
   let typingTimer = null;
+  let lastTypingEmit = 0;
 
-  const listeners = new Set();
-
-  function emit() {
-    for (const listener of listeners) {
-      listener(state);
-    }
-  }
+  const { emit, subscribe } = createStore(() => state);
 
   function setState(patch) {
     state = { ...state, ...patch };
@@ -94,14 +90,17 @@ export function createChatThreadStore() {
       });
 
       // markChatRead is best-effort — a failure must NOT reset the loaded thread
-      markChatRead(chatId).then(() => {
-        if (generation !== openGeneration) return;
-        setState({
-          items: state.items.map((item) =>
-            item.direction === 'incoming' ? { ...item, status: 'read' } : item
-          )
-        });
-      }).catch(() => {});
+      (async () => {
+        try {
+          await markChatRead(chatId);
+          if (generation !== openGeneration) return;
+          setState({
+            items: state.items.map((item) =>
+              item.direction === 'incoming' ? { ...item, status: 'read' } : item
+            )
+          });
+        } catch { /* ignored */ }
+      })();
 
     } catch (error) {
       if (generation !== openGeneration) return;
@@ -141,8 +140,8 @@ export function createChatThreadStore() {
         chatId,
         items: result.items || [],
         error: '',
-        nextCursor: result.nextCursor || null,
-        hasMore: Boolean(result.hasMore),
+        nextCursor: result.page?.nextCursor || null,
+        hasMore: Boolean(result.page?.hasMore),
         sendStatus: 'idle',
         sendError: ''
       });
@@ -233,7 +232,11 @@ export function createChatThreadStore() {
   function notifyTyping(action) {
     if (!state.chatId) return;
     if (action === 'start') {
-      emitTypingStart(state.chatId);
+      const now = Date.now();
+      if (now - lastTypingEmit > 800) {
+        emitTypingStart(state.chatId);
+        lastTypingEmit = now;
+      }
       if (typingTimer) clearTimeout(typingTimer);
       typingTimer = setTimeout(() => notifyTyping('stop'), 1200);
       return;
@@ -347,6 +350,7 @@ export function createChatThreadStore() {
 
   function reset() {
     openGeneration += 1;
+    lastTypingEmit = 0;
     if (typingTimer) {
       clearTimeout(typingTimer);
       typingTimer = null;
@@ -368,11 +372,7 @@ export function createChatThreadStore() {
   }
 
   return {
-    subscribe(listener) {
-      listeners.add(listener);
-      listener(state);
-      return () => listeners.delete(listener);
-    },
+    subscribe,
     openChat,
     openAdminChat,
     loadMore,

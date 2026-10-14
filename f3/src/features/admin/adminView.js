@@ -22,7 +22,7 @@ function renderMonitorTab(state) {
   }
 
   return state.monitorChats.map((chat) => {
-    const title = chat.participants.map((p) => escapeHtml(p.displayName)).join(' & ');
+    const rawTitle = chat.participants.map((p) => p.displayName).join(' & ');
     const avatarLetter = escapeHtml((chat.participants[0]?.displayName || 'C').slice(0, 1).toUpperCase());
     const preview = chat.lastMessage?.text ? escapeHtml(chat.lastMessage.text) : '';
     const time = escapeHtml(formatMonitorTime(chat.lastSentAt));
@@ -30,12 +30,12 @@ function renderMonitorTab(state) {
       <div class="chat-row" role="button" tabindex="0"
            data-role="monitor-open-chat"
            data-chat-id="${escapeHtml(chat.chatId)}"
-           data-chat-title="${title}"
+           data-chat-title="${escapeHtml(rawTitle)}"
            data-chat-avatar="${avatarLetter}">
         <div class="chat-row-avatar">${avatarLetter}</div>
         <div class="chat-row-body">
           <div class="chat-row-header">
-            <span class="chat-row-title">${title}</span>
+            <span class="chat-row-title">${escapeHtml(rawTitle)}</span>
             ${time ? `<span class="chat-row-time">${time}</span>` : ''}
           </div>
           ${preview ? `<p class="chat-row-preview">${preview}</p>` : ''}

@@ -340,7 +340,9 @@ export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onEnable
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      lsPendingIcon = ev.target.result; // full data URL
+      const dataUrl = ev.target.result;
+      if (!dataUrl.startsWith('data:image/')) return;
+      lsPendingIcon = dataUrl;
       const preview = root.querySelector('.ls-icon-preview');
       if (preview) {
         preview.outerHTML = `<img src="${escapeHtml(lsPendingIcon)}" class="ls-icon-preview ls-icon-img" alt="Lock screen icon"/>`;
@@ -356,8 +358,8 @@ export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onEnable
     if (preview) preview.outerHTML = `<span class="ls-icon-preview ls-icon-initial">${escapeHtml(nameVal.slice(0,1).toUpperCase())}</span>`;
   });
 
-  root.querySelector('[data-role="ls-icon-toggle-hide"]')?.addEventListener('click', (btn) => {
-    const el = root.querySelector('[data-role="ls-icon-toggle-hide"]');
+  root.querySelector('[data-role="ls-icon-toggle-hide"]')?.addEventListener('click', (e) => {
+    const el = e.currentTarget;
     const hidden = localStorage.getItem('pava-lock-icon-hidden') === '1';
     if (hidden) {
       localStorage.removeItem('pava-lock-icon-hidden');

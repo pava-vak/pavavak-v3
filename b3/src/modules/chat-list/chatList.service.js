@@ -1,6 +1,4 @@
-﻿const { env } = require('../../config/env');
-const chatAdapter = require('../../db/chatAdapter');
-const realtime = require('../../realtime/eventEmitter');
+﻿const chatAdapter = require('../../db/chatAdapter');
 
 async function listChatsForUser(user) {
   return chatAdapter.listChatsForUser(user);

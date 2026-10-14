@@ -100,7 +100,6 @@ function registerMessageRoutes(app) {
         request.auth,
         parsed.data.chatId,
         parsed.data.text,
-        null,
         { viewOnce: parsed.data.viewOnce, expiresAt }
       );
 

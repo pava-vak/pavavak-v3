@@ -1,6 +1,7 @@
-import { devLogin, fetchMe, getCachedUser, login, logout, refreshSession, register, setUnauthorizedHandler, updateProfile } from '../../shared/apiClient.js';
+import { devLogin, fetchMe, getCachedUser, login, logout, register, setUnauthorizedHandler, updateProfile } from '../../shared/apiClient.js';
 import { disconnectSocket, connectSocket } from '../../shared/socketClient.js';
 import { readTokens } from '../../shared/tokenStore.js';
+import { createStore } from '../../shared/createStore.js';
 
 export function createSessionStore() {
   const hasToken = Boolean(readTokens().accessToken);
@@ -13,19 +14,10 @@ export function createSessionStore() {
     registerLoading: false
   };
 
-  const listeners = new Set();
-
-  function emit() {
-    for (const listener of listeners) {
-      listener(state);
-    }
-  }
+  const { emit, subscribe } = createStore(() => state);
 
   function setState(patch) {
-    state = {
-      ...state,
-      ...patch
-    };
+    state = { ...state, ...patch };
     emit();
   }
 
@@ -65,23 +57,8 @@ export function createSessionStore() {
         user: me.user,
         error: ''
       });
-    } catch (error) {
-      if (error.status === 401 && readTokens().refreshToken) {
-        try {
-          await refreshSession();
-          const me = await fetchMe();
-          connectSocket();
-          setState({
-            status: 'authenticated',
-            user: me.user,
-            error: ''
-          });
-          return;
-        } catch {
-          logout();
-        }
-      }
-
+    } catch {
+      // apiClient handles 401 → refresh → retry transparently before throwing
       disconnectSocket();
       setState({
         status: 'signed_out',
@@ -183,11 +160,7 @@ export function createSessionStore() {
   }
 
   return {
-    subscribe(listener) {
-      listeners.add(listener);
-      listener(state);
-      return () => listeners.delete(listener);
-    },
+    subscribe,
     getState() {
       return state;
     },

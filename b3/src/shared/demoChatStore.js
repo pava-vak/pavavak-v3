@@ -29,8 +29,6 @@ function userFromId(userId) {
 }
 
 function inferredDirectMemberId(chatId) {
-  const legacyMatch = String(chatId).match(/^direct::(\d+)$/);
-  if (legacyMatch) return Number(legacyMatch[1]);
   const pairMatch = String(chatId).match(/^direct::(\d+):(\d+)$/);
   return pairMatch ? [Number(pairMatch[1]), Number(pairMatch[2])] : null;
 }

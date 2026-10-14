@@ -1,4 +1,5 @@
 import { requestAdminChats, requestAdminSummary, requestAdminUsers, requestAdminResetPassword, requestAdminCreateUser, requestBroadcastUpdate } from '../../shared/apiClient.js';
+import { createStore } from '../../shared/createStore.js';
 
 export function createAdminStore() {
   let state = {
@@ -16,11 +17,7 @@ export function createAdminStore() {
     error: ''
   };
 
-  const listeners = new Set();
-
-  function emit() {
-    for (const listener of listeners) listener(state);
-  }
+  const { emit, subscribe } = createStore(() => state);
 
   function setState(patch) {
     state = { ...state, ...patch };
@@ -128,11 +125,7 @@ export function createAdminStore() {
   }
 
   return {
-    subscribe(listener) {
-      listeners.add(listener);
-      listener(state);
-      return () => listeners.delete(listener);
-    },
+    subscribe,
     load,
     loadMonitorChats,
     resetPassword,

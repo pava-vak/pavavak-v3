@@ -21,4 +21,12 @@ async function requireAuth(request, reply) {
   }
 }
 
-module.exports = { requireAuth };
+async function requireAdmin(request, reply) {
+  await requireAuth(request, reply);
+  if (reply.sent) return;
+  if (!request.auth?.isAdmin) {
+    return reply.status(403).send({ success: false, error: 'Forbidden' });
+  }
+}
+
+module.exports = { requireAuth, requireAdmin };

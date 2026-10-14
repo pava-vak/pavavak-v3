@@ -3,7 +3,7 @@ import { clearTokens, readTokens, writeTokens, readUser, writeUser } from './tok
 import { updateSocketToken } from './socketClient.js';
 
 export async function uploadMedia({ data, mimeType }) {
-  return apiRequest('/api/v3/media/upload', {
+  return request('/api/v3/media/upload', {
     method: 'POST',
     body: JSON.stringify({ data, mimeType })
   });
@@ -63,10 +63,6 @@ async function parseResponse(response) {
     success: false,
     error: 'Invalid JSON response'
   }));
-}
-
-export async function apiRequest(path, options = {}) {
-  return request(path, options);
 }
 
 async function request(path, options = {}, allowRefresh = true) {
@@ -152,11 +148,7 @@ export async function fetchMe() {
 }
 
 export async function refreshSession() {
-  // Refresh token is in the HttpOnly cookie — no body needed
-  const result = await request('/api/v3/auth/refresh', {
-    method: 'POST',
-    body: JSON.stringify({})
-  }, false);
+  const result = await request('/api/v3/auth/refresh', { method: 'POST' }, false);
   writeTokens(result.tokens);
   if (result.user) {
     writeUser(result.user);
@@ -167,11 +159,8 @@ export async function refreshSession() {
 
 export async function logout() {
   try {
-    // Server clears the HttpOnly cookie via Set-Cookie; credentials: 'include' sends it
-    await request('/api/v3/auth/logout', { method: 'POST', body: JSON.stringify({}) }, false);
-  } catch {
-    // best-effort — clear local tokens regardless
-  }
+    await request('/api/v3/auth/logout', { method: 'POST' }, false);
+  } catch { /* best-effort */ }
   clearTokens();
 }
 
@@ -198,7 +187,7 @@ export async function openViewOnceMessage(messageId) {
 }
 
 export async function updateProfile(input) {
-  return apiRequest('/api/v3/users/me', {
+  return request('/api/v3/users/me', {
     method: 'PUT',
     body: JSON.stringify(input)
   });
@@ -270,10 +259,7 @@ export async function requestAdminCleanSeedData() {
 }
 
 export async function markChatRead(chatId) {
-  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/read`, {
-    method: 'POST',
-    body: JSON.stringify({})
-  });
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/read`, { method: 'POST' });
 }
 
 export async function markDelivered(chatId, messageId) {
@@ -299,7 +285,7 @@ export async function requestDeleteChat(chatId) {
 }
 
 export async function requestBroadcastUpdate() {
-  return apiRequest('/api/v3/admin/broadcast-update', { method: 'POST' });
+  return request('/api/v3/admin/broadcast-update', { method: 'POST' });
 }
 
 export async function requestClearChat(chatId) {
@@ -428,20 +414,6 @@ export async function fetchChatMembers(chatId) {
   return request(`/api/v3/chats/${encodeURIComponent(chatId)}/members`);
 }
 
-export async function uploadAvatar(blob, mimeType) {
-  const { accessToken } = readTokens();
-  const url = `${config.apiBaseUrl}/api/v3/media/upload-binary`;
-  const response = await fetch(url, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': mimeType, ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}) },
-    body: blob
-  });
-  const json = await response.json();
-  if (!response.ok) throw new Error(json.error || 'Upload failed');
-  return json;
-}
-
 export async function fetchChatMedia(chatId, cursor = null) {
   const params = new URLSearchParams({ limit: '60' });
   if (cursor) params.set('cursor', cursor);
@@ -462,4 +434,16 @@ export async function unstarMessage(messageId) {
 }
 export async function fetchStarredMessages() {
   return request('/api/v3/starred-messages');
+}
+
+export async function fetchVapidPublicKey() {
+  return request('/api/v3/push/vapid-public-key');
+}
+
+export async function subscribePushEndpoint(subscription) {
+  return request('/api/v3/push/subscribe', { method: 'POST', body: JSON.stringify(subscription) });
+}
+
+export async function unsubscribePushEndpoint(endpoint) {
+  return request('/api/v3/push/subscribe', { method: 'DELETE', body: JSON.stringify({ endpoint }) });
 }

@@ -1,5 +1,7 @@
 const { getPool } = require('./pool');
 
+const MAX_REAL_USER_ID = 9000;
+
 function mapUser(row) {
   return {
     userId: Number(row.user_id),
@@ -77,7 +79,7 @@ async function setPasswordHash(userId, passwordHash) {
     `update v3_users
      set password_hash = $2, token_version = token_version + 1
      where user_id = $1
-       and user_id < 9000
+       and user_id < ${MAX_REAL_USER_ID}
      returning user_id, username, display_name, is_admin, disabled, token_version`,
     [userId, passwordHash]
   );
@@ -92,7 +94,7 @@ async function listUsers({ query = '', excludeUserId = null, limit = 25 } = {}) 
      where ($1 = '' or username ilike '%' || $1 || '%' or display_name ilike '%' || $1 || '%')
        and ($2::bigint is null or user_id != $2::bigint)
        and not disabled
-       and user_id < 9000
+       and user_id < ${MAX_REAL_USER_ID}
      order by display_name asc, username asc
      limit $3`,
     [query, excludeUserId, limit]
@@ -106,7 +108,7 @@ async function adminListUsers({ query = '', limit = 100 } = {}) {
     `select user_id, username, display_name, is_admin, disabled, token_version
      from v3_users
      where ($1 = '' or username ilike '%' || $1 || '%' or display_name ilike '%' || $1 || '%')
-       and user_id < 9000
+       and user_id < ${MAX_REAL_USER_ID}
      order by user_id asc
      limit $2`,
     [query, limit]
@@ -119,7 +121,7 @@ async function setDisabled(userId, disabled) {
   const result = await db.query(
     `update v3_users
      set disabled = $2, token_version = token_version + 1
-     where user_id = $1 and user_id < 9000
+     where user_id = $1 and user_id < ${MAX_REAL_USER_ID}
      returning user_id, username, display_name, is_admin, disabled, token_version`,
     [userId, Boolean(disabled)]
   );
@@ -139,7 +141,7 @@ async function getByIdWithHash(userId) {
 
 async function cleanSeedData() {
   const db = getPool();
-  await db.query('delete from v3_users where user_id >= 9000');
+  await db.query(`delete from v3_users where user_id >= ${MAX_REAL_USER_ID}`);
 }
 
 async function adminSummary() {

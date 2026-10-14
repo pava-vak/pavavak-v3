@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const https = require('https');
 const http = require('http');
 const dns = require('dns');
-const { requireAuth } = require('../../shared/security/auth.preHandler');
+const { requireAuth, requireAdmin } = require('../../shared/security/auth.preHandler');
 const { getPool } = require('../../db/pool');
 const chatAdapter = require('../../db/chatAdapter');
 const realtime = require('../../realtime/eventEmitter');
@@ -129,7 +129,7 @@ function registerFeatureRoutes(app) {
       memberIds.forEach(id => realtime.emitToUser(id, 'message:reaction', payload));
       return { success: true, emoji };
     } catch (err) {
-      return reply.status(err.status || 500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
@@ -148,7 +148,7 @@ function registerFeatureRoutes(app) {
       );
       return { success: true, members: rows.map(r => ({ userId: r.user_id, displayName: r.display_name, username: r.username, role: r.role })) };
     } catch (err) {
-      return reply.status(err.status || 500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
@@ -173,7 +173,7 @@ function registerFeatureRoutes(app) {
       }
       return { success: true, reactions: byMessage };
     } catch (err) {
-      return reply.status(err.status || 500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
@@ -195,7 +195,7 @@ function registerFeatureRoutes(app) {
       memberIds.forEach(id => realtime.emitToUser(id, 'message:edited', payload));
       return { success: true };
     } catch (err) {
-      return reply.status(err.status || 500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
@@ -248,7 +248,7 @@ function registerFeatureRoutes(app) {
       }
       return { success: true, messageId: newMessageId };
     } catch (err) {
-      return reply.status(err.status || 500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
@@ -267,7 +267,7 @@ function registerFeatureRoutes(app) {
         { chatId: request.params.chatId, messageId }));
       return { success: true };
     } catch (err) {
-      return reply.status(err.status || 500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
@@ -289,7 +289,7 @@ function registerFeatureRoutes(app) {
         ? { messageId: row.pinned_message_id, text: row.body, senderName: row.sender_name }
         : null };
     } catch (err) {
-      return reply.status(err.status || 500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
@@ -305,7 +305,7 @@ function registerFeatureRoutes(app) {
       );
       return { success: true };
     } catch (err) {
-      return reply.status(err.status || 500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
@@ -321,7 +321,7 @@ function registerFeatureRoutes(app) {
       );
       return { success: true };
     } catch (err) {
-      return reply.status(err.status || 500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
@@ -338,7 +338,7 @@ function registerFeatureRoutes(app) {
       return { success: true };
     } catch (err) {
       if (err.status === 403) return reply.status(403).send({ success: false, error: err.message });
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 
@@ -351,7 +351,7 @@ function registerFeatureRoutes(app) {
       if (!rows.length) return reply.status(404).send({ success: false, error: 'User not found' });
       return { success: true, online: isUserOnline(userId), lastSeenAt: rows[0].last_seen_at };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 
@@ -391,7 +391,7 @@ function registerFeatureRoutes(app) {
         }))
       };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 
@@ -417,7 +417,7 @@ function registerFeatureRoutes(app) {
       );
       return { success: true, preview };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 
@@ -455,7 +455,7 @@ function registerFeatureRoutes(app) {
       return { success: true, chat };
     } catch (err) {
       await client.query('rollback');
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     } finally { client.release(); }
   });
 
@@ -476,7 +476,7 @@ function registerFeatureRoutes(app) {
         { chatId: request.params.chatId, title }));
       return { success: true };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 
@@ -510,7 +510,7 @@ function registerFeatureRoutes(app) {
 
       return { success: true };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 
@@ -540,7 +540,7 @@ function registerFeatureRoutes(app) {
 
       return { success: true };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 
@@ -589,7 +589,7 @@ function registerFeatureRoutes(app) {
       return { success: true, messageId };
     } catch (err) {
       await client.query('rollback');
-      return reply.status(err.status || 500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     } finally { client.release(); }
   });
 
@@ -624,13 +624,15 @@ function registerFeatureRoutes(app) {
         { messageId: request.params.messageId, chatId: poll.conversation_id, votes }));
       return { success: true, votes };
     } catch (err) {
-      return reply.status(err.status || 500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
   app.get('/api/v3/polls/:messageId', { preHandler: requireAuth }, async (request, reply) => {
     const db = getPool();
     try {
+      // Verify membership via message lookup (returns 404 if not a member)
+      await getMessageConversation(db, request.params.messageId, request.auth.userId);
       const { rows } = await db.query(
         `select p.question, p.options,
                 json_object_agg(coalesce(v.option_index::text,'_'), count(v.user_id)) filter (where v.option_index is not null) as votes,
@@ -644,7 +646,7 @@ function registerFeatureRoutes(app) {
       const r = rows[0];
       return { success: true, poll: { question: r.question, options: r.options, votes: r.votes || {}, myVote: r.my_vote } };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
@@ -669,7 +671,7 @@ function registerFeatureRoutes(app) {
       );
       return { success: true, id: rows[0].id, scheduledAt: rows[0].scheduled_at };
     } catch (err) {
-      return reply.status(err.status || 500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
@@ -690,7 +692,7 @@ function registerFeatureRoutes(app) {
       );
       return { success: true, items: rows.map(r => ({ id: r.id, chatId: r.chat_id, text: r.body, scheduledAt: r.scheduled_at, chatTitle: r.chat_title })) };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 
@@ -704,13 +706,52 @@ function registerFeatureRoutes(app) {
       if (!rowCount) return reply.status(404).send({ success: false, error: 'Not found' });
       return { success: true };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 
   // ── Chat media gallery ─────────────────────────────────────────────────────
+  async function fetchMediaGallery(db, chatId, limit, cursor) {
+    let cursorClause = '';
+    let params = [chatId, limit + 1];
+    if (cursor) {
+      const cr = await db.query(
+        'select created_at, message_id from v3_messages where message_id=$1 and conversation_id=$2',
+        [cursor, chatId]
+      );
+      if (cr.rowCount > 0) {
+        cursorClause = 'and (msg.created_at, msg.message_id) < ($3::timestamptz, $4::text)';
+        params = [chatId, limit + 1, cr.rows[0].created_at, cr.rows[0].message_id];
+      }
+    }
+    const { rows } = await db.query(
+      `select msg.message_id, msg.body, msg.created_at,
+              coalesce(u.display_name, u.username, msg.sender_id::text) as sender_name
+       from v3_messages msg
+       left join v3_users u on u.user_id = msg.sender_id
+       where msg.conversation_id=$1
+         and msg.deleted_at is null
+         and (msg.body like '__IMG__%' or msg.body like '__VID__%' or msg.body like '__AUD__%' or msg.body like '__DOC__%')
+         ${cursorClause}
+       order by msg.created_at desc, msg.message_id desc
+       limit $2`,
+      params
+    );
+    const hasMore = rows.length > limit;
+    const items = (hasMore ? rows.slice(0, limit) : rows).map(r => ({
+      messageId: r.message_id,
+      fileId: r.body.startsWith('__DOC__') ? r.body.slice(8).split(':')[0] : r.body.slice(8),
+      type: r.body.startsWith('__IMG__') ? 'image'
+          : r.body.startsWith('__VID__') ? 'video'
+          : r.body.startsWith('__AUD__') ? 'audio'
+          : 'document',
+      sentAt: r.created_at?.toISOString?.() || r.created_at,
+      senderName: r.sender_name
+    }));
+    return { items, hasMore, nextCursor: hasMore ? items[items.length - 1].messageId : null };
+  }
+
   // GET /api/v3/chats/:chatId/media?cursor=&limit=
-  // Returns all __IMG__ and __VID__ messages, newest first, paginated.
   app.get('/api/v3/chats/:chatId/media', { preHandler: requireAuth }, async (request, reply) => {
     const db = getPool();
     const { chatId } = request.params;
@@ -718,103 +759,24 @@ function registerFeatureRoutes(app) {
     const cursor = request.query?.cursor || null;
     try {
       await assertMember(db, chatId, request.auth.userId);
-
-      let cursorClause = '';
-      let params = [chatId, limit + 1];
-      if (cursor) {
-        const cr = await db.query(
-          'select created_at, message_id from v3_messages where message_id=$1 and conversation_id=$2',
-          [cursor, chatId]
-        );
-        if (cr.rowCount > 0) {
-          cursorClause = 'and (msg.created_at, msg.message_id) < ($3::timestamptz, $4::text)';
-          params = [chatId, limit + 1, cr.rows[0].created_at, cr.rows[0].message_id];
-        }
-      }
-
-      const { rows } = await db.query(
-        `select msg.message_id, msg.body, msg.created_at,
-                coalesce(u.display_name, u.username, msg.sender_id::text) as sender_name
-         from v3_messages msg
-         left join v3_users u on u.user_id = msg.sender_id
-         where msg.conversation_id=$1
-           and msg.deleted_at is null
-           and (msg.body like '__IMG__%' or msg.body like '__VID__%' or msg.body like '__AUD__%' or msg.body like '__DOC__%')
-           ${cursorClause}
-         order by msg.created_at desc, msg.message_id desc
-         limit $2`,
-        params
-      );
-
-      const hasMore = rows.length > limit;
-      const items = (hasMore ? rows.slice(0, limit) : rows).map(r => ({
-        messageId: r.message_id,
-        fileId: r.body.startsWith('__DOC__') ? r.body.slice(8).split(':')[0] : r.body.slice(8),
-        type: r.body.startsWith('__IMG__') ? 'image'
-            : r.body.startsWith('__VID__') ? 'video'
-            : r.body.startsWith('__AUD__') ? 'audio'
-            : 'document',
-        sentAt: r.created_at?.toISOString?.() || r.created_at,
-        senderName: r.sender_name
-      }));
-
-      return { success: true, items, hasMore, nextCursor: hasMore ? items[items.length - 1].messageId : null };
+      const result = await fetchMediaGallery(db, chatId, limit, cursor);
+      return { success: true, ...result };
     } catch (err) {
-      if (err.status === 403) return reply.status(403).send({ success: false, error: err.message });
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
 
   // ── Admin chat media gallery ───────────────────────────────────────────────
-  app.get('/api/v3/admin/chats/:chatId/media', { preHandler: requireAuth }, async (request, reply) => {
-    if (!request.auth.isAdmin) return reply.status(403).send({ success: false, error: 'Forbidden' });
+  app.get('/api/v3/admin/chats/:chatId/media', { preHandler: requireAdmin }, async (request, reply) => {
     const db = getPool();
     const { chatId } = request.params;
     const limit = Math.min(Number(request.query?.limit) || 60, 120);
     const cursor = request.query?.cursor || null;
     try {
-      let cursorClause = '';
-      let params = [chatId, limit + 1];
-      if (cursor) {
-        const cr = await db.query(
-          'select created_at, message_id from v3_messages where message_id=$1 and conversation_id=$2',
-          [cursor, chatId]
-        );
-        if (cr.rowCount > 0) {
-          cursorClause = 'and (msg.created_at, msg.message_id) < ($3::timestamptz, $4::text)';
-          params = [chatId, limit + 1, cr.rows[0].created_at, cr.rows[0].message_id];
-        }
-      }
-
-      const { rows } = await db.query(
-        `select msg.message_id, msg.body, msg.created_at,
-                coalesce(u.display_name, u.username, msg.sender_id::text) as sender_name
-         from v3_messages msg
-         left join v3_users u on u.user_id = msg.sender_id
-         where msg.conversation_id=$1
-           and msg.deleted_at is null
-           and (msg.body like '__IMG__%' or msg.body like '__VID__%' or msg.body like '__AUD__%' or msg.body like '__DOC__%')
-           ${cursorClause}
-         order by msg.created_at desc, msg.message_id desc
-         limit $2`,
-        params
-      );
-
-      const hasMore = rows.length > limit;
-      const items = (hasMore ? rows.slice(0, limit) : rows).map(r => ({
-        messageId: r.message_id,
-        fileId: r.body.startsWith('__DOC__') ? r.body.slice(8).split(':')[0] : r.body.slice(8),
-        type: r.body.startsWith('__IMG__') ? 'image'
-            : r.body.startsWith('__VID__') ? 'video'
-            : r.body.startsWith('__AUD__') ? 'audio'
-            : 'document',
-        sentAt: r.created_at?.toISOString?.() || r.created_at,
-        senderName: r.sender_name
-      }));
-
-      return { success: true, items, hasMore, nextCursor: hasMore ? items[items.length - 1].messageId : null };
+      const result = await fetchMediaGallery(db, chatId, limit, cursor);
+      return { success: true, ...result };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 
@@ -836,7 +798,7 @@ function registerFeatureRoutes(app) {
       );
       return { success: true };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 
@@ -849,7 +811,7 @@ function registerFeatureRoutes(app) {
       );
       return { success: true };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 
@@ -880,7 +842,7 @@ function registerFeatureRoutes(app) {
         }))
       };
     } catch (err) {
-      return reply.status(500).send({ success: false, error: err.message });
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
 }

@@ -401,7 +401,7 @@ async function appendOutgoingMessage(user, chatId, text, messageId = null, { vie
           viewOnce ? '👁 View once message' : text,
           sentAt,
           isSender ? 'outgoing' : 'incoming',
-          isSender ? 'sent' : 'sent',
+          'sent',
           isSender
         ]
       );

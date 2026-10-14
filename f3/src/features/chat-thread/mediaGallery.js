@@ -1,4 +1,5 @@
 import { fetchChatMedia, fetchAdminChatMedia, requestMediaBlob, requestDeleteMessage } from '../../shared/apiClient.js';
+import { escapeHtml } from '../../shared/html.js';
 
 const IST_OPTS = { timeZone: 'Asia/Kolkata', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
 
@@ -7,11 +8,17 @@ function formatGalleryDate(isoString) {
 }
 
 const blobCache = new Map();
+const BLOB_CACHE_MAX = 60;
 
 async function loadBlob(fileId) {
   if (blobCache.has(fileId)) return blobCache.get(fileId);
   const blob = await requestMediaBlob(fileId);
   const url = URL.createObjectURL(blob);
+  if (blobCache.size >= BLOB_CACHE_MAX) {
+    const oldest = blobCache.keys().next().value;
+    URL.revokeObjectURL(blobCache.get(oldest));
+    blobCache.delete(oldest);
+  }
   blobCache.set(fileId, url);
   return url;
 }
@@ -268,7 +275,7 @@ export function openMediaGallery({ chatId, chatTitle, isAdmin = false }) {
     return `<div class="mg-grid">${list.map((item, idx) => {
       const sel = selected.has(item.messageId);
       return `
-        <div class="mg-cell ${selectMode && sel ? 'mg-cell-selected' : ''}" data-mg-item="${item.messageId}" data-mg-idx="${idx}" data-mg-type="${item.type}" data-mg-fileid="${item.fileId}" title="${item.senderName} · ${formatGalleryDate(item.sentAt)}">
+        <div class="mg-cell ${selectMode && sel ? 'mg-cell-selected' : ''}" data-mg-item="${escapeHtml(item.messageId)}" data-mg-idx="${idx}" data-mg-type="${escapeHtml(item.type)}" data-mg-fileid="${escapeHtml(item.fileId)}" title="${escapeHtml(item.senderName)} · ${formatGalleryDate(item.sentAt)}">
           <div class="mg-thumb" data-state="idle">
             ${item.type === 'video' ? '<span class="mg-thumb-play">▶</span>' : ''}
             <span class="mg-thumb-icon">${item.type === 'video' ? '🎥' : '📷'}</span>
@@ -285,14 +292,14 @@ export function openMediaGallery({ chatId, chatTitle, isAdmin = false }) {
       const ext = item.fileId.split('.').pop().toUpperCase();
       const sel = selected.has(item.messageId);
       return `
-        <div class="mg-doc-row ${selectMode && sel ? 'mg-cell-selected' : ''}" data-mg-item="${item.messageId}" data-mg-type="document" data-mg-fileid="${item.fileId}">
+        <div class="mg-doc-row ${selectMode && sel ? 'mg-cell-selected' : ''}" data-mg-item="${escapeHtml(item.messageId)}" data-mg-type="document" data-mg-fileid="${escapeHtml(item.fileId)}">
           ${selectMode ? `<span class="mg-sel-check">${sel ? '✓' : ''}</span>` : ''}
           <span class="mg-doc-icon">📄</span>
           <div class="mg-doc-info">
-            <span class="mg-doc-name">${item.fileId}</span>
-            <span class="mg-doc-meta">${ext} · ${item.senderName} · ${formatGalleryDate(item.sentAt)}</span>
+            <span class="mg-doc-name">${escapeHtml(item.filename || item.fileId)}</span>
+            <span class="mg-doc-meta">${escapeHtml(ext)} · ${escapeHtml(item.senderName)} · ${formatGalleryDate(item.sentAt)}</span>
           </div>
-          ${!selectMode ? `<button class="mg-doc-dl" data-mg-dl="${item.fileId}" title="Download">⬇</button>` : ''}
+          ${!selectMode ? `<button class="mg-doc-dl" data-mg-dl="${escapeHtml(item.fileId)}" title="Download">⬇</button>` : ''}
         </div>
       `;
     }).join('')}</div>`;
@@ -307,10 +314,10 @@ export function openMediaGallery({ chatId, chatTitle, isAdmin = false }) {
           ${selectMode ? `<span class="mg-sel-check">${sel ? '✓' : ''}</span>` : ''}
           <span class="mg-audio-icon">🎤</span>
           <div class="mg-audio-info">
-            <audio class="mg-audio-player" controls src="" data-mg-audio="${item.fileId}"></audio>
-            <span class="mg-audio-meta">${item.senderName} · ${formatGalleryDate(item.sentAt)}</span>
+            <audio class="mg-audio-player" controls src="" data-mg-audio="${escapeHtml(item.fileId)}"></audio>
+            <span class="mg-audio-meta">${escapeHtml(item.senderName)} · ${formatGalleryDate(item.sentAt)}</span>
           </div>
-          ${!selectMode ? `<button class="mg-doc-dl" data-mg-dl="${item.fileId}" title="Download">⬇</button>` : ''}
+          ${!selectMode ? `<button class="mg-doc-dl" data-mg-dl="${escapeHtml(item.fileId)}" title="Download">⬇</button>` : ''}
         </div>
       `;
     }).join('')}</div>`;

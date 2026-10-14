@@ -57,12 +57,12 @@ export function renderLoginView({ state, appEnv = 'development', activeThemeId =
   const showDevTools = appEnv !== 'production';
   const loginLoading = state.loginLoading || false;
   const registerLoading = state.registerLoading || false;
-  const quickUsers = [
+  const quickUsers = showDevTools ? [
     { userId: 1,   username: 'admin',  password: 'admin123',  displayName: 'Admin',      isAdmin: true  },
     { userId: 2,   username: 'demo',   password: 'demo123',   displayName: 'Demo User',  isAdmin: false },
     { userId: 3,   username: 'tester', password: 'tester123', displayName: 'Tester',     isAdmin: false },
     { userId: 101, username: 'nenu',   password: 'nenu123',   displayName: 'Nenu Natho', isAdmin: false }
-  ];
+  ] : [];
 
   return `
     <div class="auth-shell">

@@ -30,11 +30,7 @@ function getStore() {
 
 async function listChatsForUser(user) {
   assertStorageConfigured();
-  const store = getStore();
-  if (useNormalized() || useLegacyDb()) {
-    return store.listChatsForUser(user);
-  }
-  return demoStore.listChatsForUser(user);
+  return getStore().listChatsForUser(user);
 }
 
 async function listMessagesForChat(params) {
@@ -46,7 +42,7 @@ async function listMessagesForChat(params) {
   return demoStore.listMessagesForChat(params.user, params.chatId, params.cursor, params.limit);
 }
 
-async function appendOutgoingMessage(user, chatId, text, _unused = null, flags = {}) {
+async function appendOutgoingMessage(user, chatId, text, flags = {}) {
   assertStorageConfigured();
   const messageId = `m-${crypto.randomUUID()}`;
 

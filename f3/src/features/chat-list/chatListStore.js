@@ -1,4 +1,5 @@
 import { requestChats, requestDeleteChat } from '../../shared/apiClient.js';
+import { createStore } from '../../shared/createStore.js';
 
 export function createChatListStore() {
   let state = {
@@ -7,13 +8,7 @@ export function createChatListStore() {
     error: ''
   };
 
-  const listeners = new Set();
-
-  function emit() {
-    for (const listener of listeners) {
-      listener(state);
-    }
-  }
+  const { emit, subscribe } = createStore(() => state);
 
   function setState(patch) {
     state = { ...state, ...patch };
@@ -138,11 +133,7 @@ export function createChatListStore() {
   }
 
   return {
-    subscribe(listener) {
-      listeners.add(listener);
-      listener(state);
-      return () => listeners.delete(listener);
-    },
+    subscribe,
     load,
     applyOutgoingMessage,
     applyChatUpdated,

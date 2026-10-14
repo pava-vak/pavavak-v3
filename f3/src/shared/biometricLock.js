@@ -10,7 +10,10 @@ function b64ToBuffer(b64) {
 }
 
 function bufferToB64(buf) {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const arr = new Uint8Array(buf);
+  let str = '';
+  for (let i = 0; i < arr.length; i++) str += String.fromCharCode(arr[i]);
+  return btoa(str);
 }
 
 export function isSupported() {
@@ -121,18 +124,18 @@ async function hashPinPbkdf2(pin, salt) {
     { name: 'PBKDF2', hash: 'SHA-256', salt: new TextEncoder().encode(salt), iterations: 200000 },
     keyMaterial, 256
   );
-  return '__pbkdf2__' + btoa(String.fromCharCode(...new Uint8Array(bits)));
+  return '__pbkdf2__' + bufferToB64(bits);
 }
 
 async function hashPinLegacy(pin, salt) {
   const data = new TextEncoder().encode(pin + salt);
   const buf = await crypto.subtle.digest('SHA-256', data);
-  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+  return bufferToB64(buf);
 }
 
 export async function setPin(pin) {
   const saltBytes = crypto.getRandomValues(new Uint8Array(16));
-  const salt = btoa(String.fromCharCode(...saltBytes));
+  const salt = bufferToB64(saltBytes.buffer);
   const hash = await hashPinPbkdf2(pin, salt);
   localStorage.setItem('pava-pin-salt', salt);
   localStorage.setItem('pava-pin-hash', hash);

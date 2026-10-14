@@ -1,5 +1,5 @@
-import { escapeHtml, formatMessagePreview, linkifyHtml } from '../../shared/html.js';
-import { uploadMedia, uploadVideoBlob, uploadBinaryBlob, requestMediaBlob, reactToMessage, editMessage, forwardMessage, pinMessage, fetchPinnedMessage } from '../../shared/apiClient.js';
+import { escapeHtml, linkifyHtml } from '../../shared/html.js';
+import { uploadMedia, uploadVideoBlob, uploadBinaryBlob, requestMediaBlob, reactToMessage, editMessage, votePoll, fetchPoll, fetchLinkPreview, forwardMessage, pinMessage, fetchPinnedMessage } from '../../shared/apiClient.js';
 import { createEmojiPicker } from '../../shared/emojiPicker.js';
 import { openMediaGallery } from './mediaGallery.js';
 
@@ -614,8 +614,20 @@ function autoGrow(el) {
   el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
 }
 
-// Module-level image blob cache — survives re-renders
+// Module-level state that survives re-renders
+let _activeCloseImgMenu = null;
+
+// Image blob cache (LRU, max 80 entries)
 const imgCache = new Map();
+const IMG_CACHE_MAX = 80;
+function imgCacheSet(fileId, url) {
+  if (imgCache.size >= IMG_CACHE_MAX) {
+    const oldest = imgCache.keys().next().value;
+    URL.revokeObjectURL(imgCache.get(oldest));
+    imgCache.delete(oldest);
+  }
+  imgCache.set(fileId, url);
+}
 
 // allFileIds: ordered list of all image fileIds visible in the current thread
 // startIdx: which one to open first
@@ -695,7 +707,7 @@ function openImageViewer(allFileIds, startIdx) {
     try {
       const blob = await requestMediaBlob(fileId);
       const url = URL.createObjectURL(blob);
-      imgCache.set(fileId, url);
+      imgCacheSet(fileId, url);
       img.src = url;
       img.style.opacity = '1';
     } catch {
@@ -710,7 +722,7 @@ function openImageViewer(allFileIds, startIdx) {
     [idx - 1, idx + 1].forEach(ni => {
       if (ni >= 0 && ni < total && !imgCache.has(allFileIds[ni])) {
         requestMediaBlob(allFileIds[ni])
-          .then(b => imgCache.set(allFileIds[ni], URL.createObjectURL(b)))
+          .then(b => imgCacheSet(allFileIds[ni], URL.createObjectURL(b)))
           .catch(() => {});
       }
     });
@@ -1209,7 +1221,7 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
           if (!url) {
             const blob = await requestMediaBlob(fileId);
             url = URL.createObjectURL(blob);
-            imgCache.set(fileId, url);
+            imgCacheSet(fileId, url);
           }
           bubble.dataset.view = 'blurred';
           bubble.style.backgroundImage = `url('${url}')`;
@@ -1244,7 +1256,7 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
         if (!url) {
           const blob = await requestMediaBlob(fileId);
           url = URL.createObjectURL(blob);
-          imgCache.set(fileId, url);
+          imgCacheSet(fileId, url);
         }
         bubble.dataset.view = 'ready';
         bubble.innerHTML = `
@@ -1454,11 +1466,10 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
     e.stopPropagation(); closeImgMenu();
     await openCamera((file) => uploadAndSendFile(file));
   });
-  // Store reference so we can remove it when this binding is replaced
-  if (bindChatThreadView._closeImgMenu) {
-    document.removeEventListener('click', bindChatThreadView._closeImgMenu);
+  if (_activeCloseImgMenu) {
+    document.removeEventListener('click', _activeCloseImgMenu);
   }
-  bindChatThreadView._closeImgMenu = closeImgMenu;
+  _activeCloseImgMenu = closeImgMenu;
   document.addEventListener('click', closeImgMenu);
 
   // Resize + re-encode only if necessary. Small files (≤500KB) are sent as-is
@@ -1513,7 +1524,7 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
       alert('Failed to send: ' + (err.message || 'Unknown error'));
     } finally {
       attachBtn.disabled = false;
-      attachBtn.textContent = '📎';
+      attachBtn.textContent = '＋';
     }
   }
 
@@ -1543,7 +1554,7 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
     } catch (err) {
       alert('Failed to send file: ' + (err.message || 'Unknown error'));
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '📎'; }
+      if (btn) { btn.disabled = false; btn.textContent = '＋'; }
     }
   });
 
@@ -1752,9 +1763,7 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
           const doSave = () => {
             const newText = ta.value.trim();
             if (newText && newText !== originalText) {
-              import('../../shared/apiClient.js').then(({ editMessage }) =>
-                editMessage(messageId, newText).catch(() => {})
-              );
+              editMessage(messageId, newText).catch(() => {});
             }
             editForm.replaceWith(textEl);
           };
@@ -1873,10 +1882,7 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
       const optionIndex = Number(btn.dataset.optionIndex);
       btn.disabled = true;
       try {
-        const { votePoll } = await import('../../shared/apiClient.js');
         await votePoll(messageId, optionIndex);
-        // Refresh poll data and update bubble in-place
-        const { fetchPoll } = await import('../../shared/apiClient.js');
         const data = await fetchPoll(messageId);
         if (data?.poll) {
           const pollBubble = root.querySelector(`.poll-bubble[data-message-id="${messageId}"]`);
@@ -1921,9 +1927,7 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
       `;
     };
     if (linkPreviewCache.has(url)) { inject(linkPreviewCache.get(url)); return; }
-    import('../../shared/apiClient.js').then(({ fetchLinkPreview }) =>
-      fetchLinkPreview(url)
-    ).then(data => {
+    fetchLinkPreview(url).then(data => {
       // API returns { success, preview: { title, image_url, description, ... } }
       const preview = data?.preview || data;
       // Normalise image_url → image for the inject function
