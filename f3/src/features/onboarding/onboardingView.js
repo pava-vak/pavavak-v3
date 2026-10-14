@@ -62,12 +62,6 @@ export function renderOnboarding({ step, pinFirst, pinEntry, error }) {
     );
   }
 
-  if (step === 'biometric') {
-    return card('🔐', 'Biometric unlock', 'Use fingerprint or Face ID to open PaVa Vak instantly.', `
-      <button class="app-lock-btn primary-button" data-role="ob-biometric">Enable Biometric</button>
-    `);
-  }
-
   if (step === 'permissions') {
     const items = PERMISSIONS.map(p => `
       <label class="ob-perm-row">

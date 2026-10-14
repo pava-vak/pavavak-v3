@@ -1,6 +1,6 @@
 import { escapeHtml } from '../../shared/html.js';
 import { changePassword } from '../../shared/apiClient.js';
-import { isEnabled as isLockEnabled, hasPin, getLockTimer, hasBiometricEnrolled } from '../../shared/biometricLock.js';
+import { isEnabled as isLockEnabled, hasPin, getLockTimer } from '../../shared/biometricLock.js';
 import { THEMES, getActiveTheme, setTheme } from '../../shared/themeStore.js';
 
 function getLockScreenPrefs() {
@@ -12,12 +12,11 @@ function getLockScreenPrefs() {
   };
 }
 
-export function renderSettingsModal(user = {}, biometricAvailable = false) {
+export function renderSettingsModal(user = {}) {
   const displayName = user.displayName || '';
   const username = user.username || '';
   const lockEnabled = isLockEnabled();
   const lockTimer = getLockTimer();
-  const biometricEnabled = lockEnabled && hasBiometricEnrolled();
   const pinEnabled = hasPin();
   return `
     <div class="settings-overlay" data-role="settings-overlay">
@@ -52,17 +51,7 @@ export function renderSettingsModal(user = {}, biometricAvailable = false) {
             <div id="settings-lock-error" class="settings-error" role="alert" style="display:none"></div>
             <div id="settings-lock-success" class="settings-success" role="status" style="display:none"></div>
 
-            ${biometricAvailable ? `
             <div class="settings-lock-row">
-              <span class="settings-lock-label">${biometricEnabled ? '🔐 Biometric ON' : '🔐 Biometric OFF'}</span>
-              ${biometricEnabled
-                ? `<button class="settings-lock-btn settings-lock-btn--off" data-role="disable-biometric">Remove</button>`
-                : `<button class="settings-lock-btn settings-lock-btn--on" data-role="enable-lock">Enable</button>`
-              }
-            </div>
-            ` : `<p class="settings-lock-hint" style="margin-top:4px">Biometric not available — use PIN lock below.</p>`}
-
-            <div class="settings-lock-row" style="margin-top:8px">
               <span class="settings-lock-label">${pinEnabled ? '🔢 PIN ON' : '🔢 PIN OFF'}</span>
               <div style="display:flex;gap:6px">
                 ${pinEnabled
@@ -212,7 +201,7 @@ export function renderSettingsModal(user = {}, biometricAvailable = false) {
   `;
 }
 
-export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onEnableLock, onDisableLock, onDisableBiometric, onSetPin, onRemovePin, onSetLockTimer, onLockNow, onViewStarred }) {
+export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onDisableLock, onSetPin, onRemovePin, onSetLockTimer, onLockNow, onViewStarred }) {
   root.querySelector('[data-role="settings-close"]')?.addEventListener('click', onClose);
 
   root.querySelector('[data-role="view-starred"]')?.addEventListener('click', () => {
@@ -258,25 +247,9 @@ export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onEnable
     el.style.display = 'block';
   }
 
-  root.querySelector('[data-role="enable-lock"]')?.addEventListener('click', async () => {
-    if (lockErrorEl) lockErrorEl.style.display = 'none';
-    if (lockSuccessEl) lockSuccessEl.style.display = 'none';
-    try {
-      await onEnableLock?.();
-      showLockMsg(lockSuccessEl, '🔐 App Lock enabled.');
-    } catch (err) {
-      showLockMsg(lockErrorEl, err.message || 'Could not enable App Lock.');
-    }
-  });
-
   root.querySelector('[data-role="disable-lock"]')?.addEventListener('click', () => {
     onDisableLock?.();
     showLockMsg(lockSuccessEl, '🔓 App Lock disabled.');
-  });
-
-  root.querySelector('[data-role="disable-biometric"]')?.addEventListener('click', () => {
-    onDisableBiometric?.();
-    showLockMsg(lockSuccessEl, '🔐 Biometric removed.');
   });
 
   root.querySelector('[data-role="lock-timer"]')?.addEventListener('change', (e) => {

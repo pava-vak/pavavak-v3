@@ -2778,39 +2778,6 @@ html, body { height: 100%; overscroll-behavior: none; }
   margin: 0; letter-spacing: -0.3px;
 }
 
-/* Middle: fingerprint button */
-.app-lock-bio-zone {
-  display: flex; flex-direction: column; align-items: center; gap: 16px;
-}
-
-.app-lock-bio-btn {
-  width: 80px; height: 80px; border-radius: 50%;
-  background: color-mix(in srgb, var(--v3-accent) 14%, transparent);
-  border: 2px solid color-mix(in srgb, var(--v3-accent) 40%, transparent);
-  color: var(--v3-accent);
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: transform 0.15s, background 0.2s, border-color 0.2s;
-  -webkit-tap-highlight-color: transparent;
-}
-.app-lock-bio-btn:active { transform: scale(0.92); }
-.app-lock-bio-btn.bio-error {
-  background: color-mix(in srgb, var(--v3-danger, #e05252) 12%, transparent);
-  border-color: color-mix(in srgb, var(--v3-danger, #e05252) 35%, transparent);
-  color: var(--v3-danger, #e05252);
-}
-
-@keyframes bio-pulse {
-  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--v3-accent) 40%, transparent); }
-  70%  { box-shadow: 0 0 0 18px color-mix(in srgb, var(--v3-accent) 0%, transparent); }
-  100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--v3-accent) 0%, transparent); }
-}
-.app-lock-bio-btn.bio-idle {
-  animation: bio-pulse 1.6s ease-out infinite;
-}
-
-.app-lock-bio-hint {
-  font-size: 13px; color: var(--v3-muted); margin: 0; letter-spacing: .02em;
-}
 .app-lock-error { font-size: 13px; color: var(--v3-danger, #e05252); margin: 0; text-align: center; }
 
 /* PIN zone */
