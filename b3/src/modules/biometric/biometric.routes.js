@@ -95,8 +95,9 @@ function registerBiometricRoutes(app) {
     const rpId = getRpId(request);
 
     const existing = await repo.getCredential(userId);
+    // v9 requires Buffer/Uint8Array for credential id fields; string inputs silently produce empty strings
     const excludeCredentials = existing
-      ? [{ id: existing.credential_id, type: 'public-key', transports: existing.transports }]
+      ? [{ id: Buffer.from(existing.credential_id, 'base64url'), type: 'public-key', transports: existing.transports }]
       : [];
 
     const options = await generateRegistrationOptions({
@@ -115,6 +116,11 @@ function registerBiometricRoutes(app) {
       timeout: 60000,
       supportedAlgorithmIDs: [-7, -257] // ES256, RS256
     });
+
+    // v9 returns user.id as Buffer — must be a base64url string for the client
+    if (Buffer.isBuffer(options.user?.id)) {
+      options.user = { ...options.user, id: options.user.id.toString('base64url') };
+    }
 
     storeChallenge(userId, options.challenge);
     return { success: true, options };
@@ -189,7 +195,8 @@ function registerBiometricRoutes(app) {
     const options = await generateAuthenticationOptions({
       rpID: getRpId(request),
       allowCredentials: [{
-        id: cred.credential_id,
+        // v9 requires Buffer/Uint8Array; string input silently produces empty string
+        id: Buffer.from(cred.credential_id, 'base64url'),
         type: 'public-key',
         transports: cred.transports?.length ? cred.transports : ['internal']
       }],
