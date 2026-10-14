@@ -1,4 +1,4 @@
-import { escapeHtml, linkifyHtml } from '../../shared/html.js';
+import { escapeHtml, linkifyHtml, linkifyAndEmojiHtml, isEmojiOnly, countEmoji } from '../../shared/html.js';
 import { uploadMedia, uploadVideoBlob, uploadBinaryBlob, requestMediaBlob, reactToMessage, editMessage, votePoll, fetchPoll, fetchLinkPreview, forwardMessage, pinMessage, fetchPinnedMessage } from '../../shared/apiClient.js';
 import { createEmojiPicker } from '../../shared/emojiPicker.js';
 import { openMediaGallery } from './mediaGallery.js';
@@ -405,18 +405,26 @@ function renderMessageBubble(item, showSender = false, reactions = null, isAdmin
     }
   }
 
+  // Emoji-only detection (only when no quote block)
+  const emojiOnlyMsg = !quoteBlock && isEmojiOnly(bodyText);
+  const emojiCount = emojiOnlyMsg ? countEmoji(bodyText) : 0;
+  // jumbo = 1-3 emoji (no bubble bg), large = 4-7 emoji (bubble, bigger font)
+  const emojiSizeClass = emojiOnlyMsg
+    ? (emojiCount <= 3 ? 'msg-emoji-jumbo' : emojiCount <= 7 ? 'msg-emoji-large' : '')
+    : '';
+
   // Detect first URL for link preview
   const urlMatch = bodyText?.match(/https?:\/\/[^\s<>"']+/);
   const previewUrl = urlMatch ? urlMatch[0] : null;
 
   return `
-    <article class="message-bubble ${isOutgoing ? 'message-outgoing' : 'message-incoming'}"
+    <article class="message-bubble ${isOutgoing ? 'message-outgoing' : 'message-incoming'}${emojiSizeClass ? ` ${emojiSizeClass}` : ''}"
              data-message-id="${escapeHtml(item.messageId)}"
              data-direction="${isOutgoing ? 'outgoing' : 'incoming'}"
              ${previewUrl ? `data-preview-url="${escapeHtml(previewUrl)}"` : ''}>
       ${showSender && item.senderDisplayName ? `<span class="bubble-sender">${escapeHtml(item.senderDisplayName)}</span>` : ''}
       ${quoteBlock}
-      <p class="message-text">${linkifyHtml(bodyText)}</p>
+      <p class="message-text">${emojiOnlyMsg ? bodyText : linkifyAndEmojiHtml(bodyText)}</p>
       ${previewUrl ? `<div class="link-preview-slot" data-role="link-preview-slot"></div>` : ''}
       ${item.editedAt ? `<span class="msg-edited-badge">edited</span>` : ''}
       ${item.forwarded ? `<span class="msg-forwarded-badge">↪ Forwarded</span>` : ''}

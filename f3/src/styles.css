@@ -1835,6 +1835,36 @@ input {
   line-height: 1.5;
 }
 
+/* Inline emoji in mixed text — slightly larger than surrounding text */
+.inline-emoji {
+  font-size: 1.35em;
+  line-height: 1;
+  display: inline-block;
+  vertical-align: -0.1em;
+}
+
+/* Emoji-only messages — jumbo (1–3 emoji): no bubble background */
+.msg-emoji-jumbo {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 4px 2px !important;
+}
+.msg-emoji-jumbo .message-text {
+  font-size: 42px;
+  line-height: 1.2;
+  letter-spacing: 2px;
+}
+.msg-emoji-jumbo .message-meta {
+  color: var(--v3-muted) !important;
+}
+
+/* Emoji-only messages — large (4–7 emoji): normal bubble, bigger font */
+.msg-emoji-large .message-text {
+  font-size: 28px;
+  line-height: 1.3;
+  letter-spacing: 1px;
+}
+
 .message-meta {
   display: flex;
   gap: 4px;
