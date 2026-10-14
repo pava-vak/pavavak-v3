@@ -350,7 +350,7 @@ async function appendOutgoingMessage(user, chatId, text, messageId = null, { vie
   const memberIds = membersResult.rows.map((row) => Number(row.user_id));
 
   // Extract file_id from media messages for indexed auth lookups
-  const mediaMatch = /^__(IMG|VID|AUD|DOC)__:(.+)$/.exec(text);
+  const mediaMatch = /^__(IMG|VID|AUD|DOC)__:([^:]+)/.exec(text);
   const mediaFileId = mediaMatch ? mediaMatch[2] : null;
 
   const client = await db.connect();

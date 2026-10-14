@@ -8,6 +8,7 @@ const { getPool } = require('../../db/pool');
 const chatAdapter = require('../../db/chatAdapter');
 const realtime = require('../../realtime/eventEmitter');
 const { isUserOnline } = require('../../realtime/connectionRegistry');
+const { canAccessFile, fileIdFromBody } = require('../media/mediaAccess');
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -29,10 +30,12 @@ async function getMemberIds(db, conversationId) {
 
 async function getMessageConversation(db, messageId, userId) {
   const { rows } = await db.query(
-    `select m.conversation_id, m.sender_id, m.body
+    `select m.conversation_id, m.sender_id, m.body, m.view_once, m.expires_at
      from v3_messages m
      join v3_conversation_members cm on cm.conversation_id=m.conversation_id and cm.user_id=$2
-     where m.message_id=$1 and m.deleted_at is null limit 1`,
+     join v3_message_receipts r on r.message_id=m.message_id and r.user_id=$2
+     where m.message_id=$1 and m.deleted_at is null
+       and (m.expires_at is null or m.expires_at > now()) limit 1`,
     [messageId, userId]
   );
   if (!rows.length) { const e = new Error('Message not found'); e.status = 404; throw e; }
@@ -202,6 +205,7 @@ function registerFeatureRoutes(app) {
     const db = getPool();
     try {
       const msg = await getMessageConversation(db, request.params.messageId, request.auth.userId);
+      if (msg.view_once) return reply.status(403).send({ success: false, error: 'View-once messages cannot be forwarded' });
       await assertMember(db, toChatId, request.auth.userId);
       const newMessageId = `m-${crypto.randomUUID()}`;
       const now = new Date().toISOString();
@@ -223,13 +227,13 @@ function registerFeatureRoutes(app) {
         );
         await db.query(
           `insert into v3_user_chat_summaries(user_id,conversation_id,last_message_id,last_message_preview,last_message_at,last_message_direction,last_message_status,unread_count,updated_at)
-           values($1,$2,$3,$4,$5,$6,$7,
-             case when $1=$8 then 0 else coalesce((select unread_count from v3_user_chat_summaries where user_id=$1 and conversation_id=$2),0)+1 end,
+           values($1::bigint,$2,$3,$4,$5,$6,$7,
+             case when $1::bigint=$8::bigint then 0 else coalesce((select unread_count from v3_user_chat_summaries where user_id=$1::bigint and conversation_id=$2),0)+1 end,
              now())
            on conflict(user_id,conversation_id) do update set
              last_message_id=$3, last_message_preview=$4, last_message_at=$5,
              last_message_direction=$6, last_message_status=$7,
-             unread_count=case when $1=$8 then 0 else v3_user_chat_summaries.unread_count+1 end,
+             unread_count=case when $1::bigint=$8::bigint then 0 else v3_user_chat_summaries.unread_count+1 end,
              updated_at=now()`,
           [memberId, toChatId, newMessageId, msg.body, now, dir, 'sent', request.auth.userId]
         );
@@ -244,6 +248,7 @@ function registerFeatureRoutes(app) {
       }
       return { success: true, messageId: newMessageId };
     } catch (err) {
+      if (!err.status) request.log.error({ err }, 'Failed to forward message');
       return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
     }
   });
@@ -254,6 +259,12 @@ function registerFeatureRoutes(app) {
     const db = getPool();
     try {
       await assertMember(db, request.params.chatId, request.auth.userId);
+      if (messageId) {
+        const msg = await getMessageConversation(db, messageId, request.auth.userId);
+        if (msg.conversation_id !== request.params.chatId || msg.view_once) {
+          return reply.status(404).send({ success: false, error: 'Message not found' });
+        }
+      }
       await db.query(
         'update v3_conversations set pinned_message_id=$1 where conversation_id=$2',
         [messageId, request.params.chatId]
@@ -273,16 +284,20 @@ function registerFeatureRoutes(app) {
     try {
       await assertMember(db, request.params.chatId, request.auth.userId);
       const { rows } = await db.query(
-        `select c.pinned_message_id, m.body, m.sender_id, u.display_name as sender_name
+        `select m.message_id, m.body, u.display_name as sender_name
          from v3_conversations c
-         left join v3_messages m on m.message_id=c.pinned_message_id
+         join v3_messages m on m.message_id=c.pinned_message_id
+           and m.conversation_id=c.conversation_id
+           and m.deleted_at is null and not m.view_once
+           and (m.expires_at is null or m.expires_at > now())
+         join v3_message_receipts r on r.message_id=m.message_id and r.user_id=$2
          left join v3_users u on u.user_id=m.sender_id
          where c.conversation_id=$1`,
-        [request.params.chatId]
+        [request.params.chatId, request.auth.userId]
       );
       const row = rows[0];
-      return { success: true, pinned: row?.pinned_message_id
-        ? { messageId: row.pinned_message_id, text: row.body, senderName: row.sender_name }
+      return { success: true, pinned: row
+        ? { messageId: row.message_id, text: row.body, senderName: row.sender_name }
         : null };
     } catch (err) {
       return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
@@ -343,7 +358,14 @@ function registerFeatureRoutes(app) {
     const userId = Number(request.params.userId);
     const db = getPool();
     try {
-      const { rows } = await db.query('select last_seen_at from v3_users where user_id=$1', [userId]);
+      const { rows } = await db.query(
+        `select u.last_seen_at from v3_users u
+         where u.user_id=$1 and exists (
+           select 1 from v3_conversation_members a
+           join v3_conversation_members b on b.conversation_id=a.conversation_id
+           where a.user_id=$1 and b.user_id=$2)`,
+        [userId, request.auth.userId]
+      );
       if (!rows.length) return reply.status(404).send({ success: false, error: 'User not found' });
       return { success: true, online: isUserOnline(userId), lastSeenAt: rows[0].last_seen_at };
     } catch (err) {
@@ -374,8 +396,10 @@ function registerFeatureRoutes(app) {
          from v3_messages m
          join v3_conversations c on c.conversation_id=m.conversation_id
          join v3_conversation_members cm on cm.conversation_id=m.conversation_id and cm.user_id=$1
+         join v3_message_receipts r on r.message_id=m.message_id and r.user_id=$1
          join v3_users u on u.user_id=m.sender_id
-         where ${whereClause} and m.deleted_at is null
+         where ${whereClause} and m.deleted_at is null and not m.view_once
+           and (m.expires_at is null or m.expires_at > now())
          order by m.created_at desc limit 30`,
         [request.auth.userId, param]
       );
@@ -661,6 +685,10 @@ function registerFeatureRoutes(app) {
     const db = getPool();
     try {
       await assertMember(db, chatId, request.auth.userId);
+      const attachedFileId = fileIdFromBody(text);
+      if (attachedFileId && !(await canAccessFile(request.auth.userId, attachedFileId))) {
+        return reply.status(403).send({ success: false, error: 'You can only send files you uploaded or received' });
+      }
       const { rows } = await db.query(
         'insert into v3_scheduled_messages(sender_id,conversation_id,body,scheduled_at) values($1,$2,$3,$4) returning id,scheduled_at',
         [request.auth.userId, chatId, text, schedDate.toISOString()]
@@ -707,17 +735,18 @@ function registerFeatureRoutes(app) {
   });
 
   // ── Chat media gallery ─────────────────────────────────────────────────────
-  async function fetchMediaGallery(db, chatId, limit, cursor) {
+  // viewerId = null for the admin gallery; otherwise only media delivered to that user
+  async function fetchMediaGallery(db, chatId, limit, cursor, viewerId = null) {
     let cursorClause = '';
-    let params = [chatId, limit + 1];
+    let params = [chatId, limit + 1, viewerId];
     if (cursor) {
       const cr = await db.query(
         'select created_at, message_id from v3_messages where message_id=$1 and conversation_id=$2',
         [cursor, chatId]
       );
       if (cr.rowCount > 0) {
-        cursorClause = 'and (msg.created_at, msg.message_id) < ($3::timestamptz, $4::text)';
-        params = [chatId, limit + 1, cr.rows[0].created_at, cr.rows[0].message_id];
+        cursorClause = 'and (msg.created_at, msg.message_id) < ($4::timestamptz, $5::text)';
+        params = [chatId, limit + 1, viewerId, cr.rows[0].created_at, cr.rows[0].message_id];
       }
     }
     const { rows } = await db.query(
@@ -727,6 +756,10 @@ function registerFeatureRoutes(app) {
        left join v3_users u on u.user_id = msg.sender_id
        where msg.conversation_id=$1
          and msg.deleted_at is null
+         and ($3::bigint is null or (
+           not msg.view_once
+           and (msg.expires_at is null or msg.expires_at > now())
+           and exists (select 1 from v3_message_receipts r where r.message_id = msg.message_id and r.user_id = $3::bigint)))
          and (msg.body like '__IMG__%' or msg.body like '__VID__%' or msg.body like '__AUD__%' or msg.body like '__DOC__%')
          ${cursorClause}
        order by msg.created_at desc, msg.message_id desc
@@ -755,7 +788,7 @@ function registerFeatureRoutes(app) {
     const cursor = request.query?.cursor || null;
     try {
       await assertMember(db, chatId, request.auth.userId);
-      const result = await fetchMediaGallery(db, chatId, limit, cursor);
+      const result = await fetchMediaGallery(db, chatId, limit, cursor, request.auth.userId);
       return { success: true, ...result };
     } catch (err) {
       return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
@@ -784,7 +817,8 @@ function registerFeatureRoutes(app) {
       const { rows } = await db.query(
         `select m.message_id from v3_messages m
          join v3_conversation_members cm on cm.conversation_id = m.conversation_id and cm.user_id = $1
-         where m.message_id = $2 and m.deleted_at is null limit 1`,
+         join v3_message_receipts r on r.message_id = m.message_id and r.user_id = $1
+         where m.message_id = $2 and m.deleted_at is null and not m.view_once limit 1`,
         [request.auth.userId, request.params.messageId]
       );
       if (!rows.length) return reply.status(404).send({ success: false, error: 'Message not found' });
@@ -825,8 +859,10 @@ function registerFeatureRoutes(app) {
          from v3_message_stars s
          join v3_messages m on m.message_id = s.message_id
          join v3_conversations c on c.conversation_id = m.conversation_id
+         join v3_conversation_members cm on cm.conversation_id = m.conversation_id and cm.user_id = $1
          join v3_users u on u.user_id = m.sender_id
          where s.user_id = $1 and m.deleted_at is null
+           and (m.expires_at is null or m.expires_at > now())
          order by s.starred_at desc limit 100`,
         [request.auth.userId]
       );

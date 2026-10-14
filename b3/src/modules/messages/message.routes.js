@@ -4,6 +4,7 @@ const chatAdapter = require('../../db/chatAdapter');
 const realtime = require('../../realtime/eventEmitter');
 const { sendPushToUser } = require('../notifications/push.service');
 const { getPool } = require('../../db/pool');
+const { canAccessFile, fileIdFromBody } = require('../media/mediaAccess');
 
 const DELETE_AFTER_DURATIONS = {
   '1h': 60 * 60 * 1000,
@@ -92,6 +93,11 @@ function registerMessageRoutes(app) {
     }
 
     try {
+      const attachedFileId = fileIdFromBody(parsed.data.text);
+      if (attachedFileId && !(await canAccessFile(request.auth.userId, attachedFileId))) {
+        return reply.status(403).send({ success: false, error: 'You can only send files you uploaded or received' });
+      }
+
       const expiresAt = parsed.data.deleteAfter !== 'never'
         ? new Date(Date.now() + DELETE_AFTER_DURATIONS[parsed.data.deleteAfter]).toISOString()
         : null;

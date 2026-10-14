@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { requireAuth } = require('../../shared/security/auth.preHandler');
-const { getPool } = require('../../db/pool');
+const { recordUpload, canAccessFile } = require('./mediaAccess');
 
 // Lazy-load sharp — if the native binding isn't compiled for this platform, uploads still work raw
 let sharp;
@@ -151,6 +151,7 @@ function registerMediaRoutes(app) {
 
     try {
       await fs.promises.writeFile(filePath, finalBuffer);
+      await recordUpload(fileId, request.auth.userId);
     } catch (err) {
       request.log.error({ err }, 'Failed to write media file');
       return reply.status(500).send({ success: false, error: 'Upload failed' });
@@ -183,6 +184,7 @@ function registerMediaRoutes(app) {
 
       try {
         await fs.promises.writeFile(filePath, body);
+        await recordUpload(fileId, request.auth.userId);
       } catch (err) {
         request.log.error({ err }, 'Failed to write video file');
         return reply.status(500).send({ success: false, error: 'Upload failed' });
@@ -210,6 +212,7 @@ function registerMediaRoutes(app) {
       const filePath = path.join(UPLOADS_DIR, fileId);
       try {
         await fs.promises.writeFile(filePath, body);
+        await recordUpload(fileId, request.auth.userId);
       } catch (err) {
         request.log.error({ err }, 'Failed to write file');
         return reply.status(500).send({ success: false, error: 'Upload failed' });
@@ -219,7 +222,6 @@ function registerMediaRoutes(app) {
   );
 
   // GET /api/v3/media/:fileId
-  // Requires auth + membership in a chat that contains the file reference
   app.get('/api/v3/media/:fileId', { preHandler: requireAuth }, async (request, reply) => {
     const { fileId } = request.params;
 
@@ -227,27 +229,8 @@ function registerMediaRoutes(app) {
       return reply.status(400).send({ success: false, error: 'Invalid file ID' });
     }
 
-    if (!request.auth.isAdmin) {
-      const db = getPool();
-      // Use indexed lookup on file_id column (v3_message_media) rather than body text scan
-      const { rows } = await db.query(
-        `select 1 from v3_message_media mm
-         join v3_conversation_members cm on cm.conversation_id = mm.conversation_id
-         where mm.file_id = $1 and cm.user_id = $2 limit 1`,
-        [fileId, request.auth.userId]
-      );
-      if (!rows.length) {
-        // Fallback: old body-text check for messages before v3_message_media existed
-        const { rows: legacyRows } = await db.query(
-          `select 1 from v3_messages m
-           join v3_conversation_members cm on cm.conversation_id = m.conversation_id
-           where (m.body = $1 or m.body = $2 or m.body = $3 or m.body = $4) and cm.user_id = $5 limit 1`,
-          [`__IMG__:${fileId}`, `__VID__:${fileId}`, `__AUD__:${fileId}`, `__DOC__:${fileId}`, request.auth.userId]
-        );
-        if (!legacyRows.length) {
-          return reply.status(403).send({ success: false, error: 'Access denied' });
-        }
-      }
+    if (!request.auth.isAdmin && !(await canAccessFile(request.auth.userId, fileId))) {
+      return reply.status(403).send({ success: false, error: 'Access denied' });
     }
 
     const filePath = path.join(UPLOADS_DIR, fileId);

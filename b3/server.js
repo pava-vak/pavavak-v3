@@ -7,6 +7,7 @@ const scheduledMessages = require('./src/jobs/scheduledMessages');
 const autoDelete = require('./src/jobs/autoDelete');
 const biometricRepo = require('./src/modules/biometric/biometric.repository');
 const sessionsRepo = require('./src/modules/auth/sessions.repository');
+const mediaAccess = require('./src/modules/media/mediaAccess');
 
 let app;
 let io;
@@ -21,6 +22,7 @@ async function start() {
   app.log.info({ port }, 'b3 listening');
   await biometricRepo.ensureTable();
   await sessionsRepo.ensureTable();
+  await mediaAccess.ensureTable();
   scheduledMessages.start();
   autoDelete.start();
 }
