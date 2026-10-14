@@ -7,19 +7,20 @@ export function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-// Matches a full emoji sequence: base + optional skin tone + optional ZWJ chain
-const EMOJI_SEQ_RE = /\p{Extended_Pictographic}(?:️|⃣)?(?:[\u{1F3FB}-\u{1F3FF}])?(?:‍(?:\p{Extended_Pictographic}(?:️)?(?:[\u{1F3FB}-\u{1F3FF}])?))*(?:️)?/gu;
+// Emoji regex using surrogate pairs — no Unicode property escapes, works on all browsers.
+// Covers: flag pairs, SMP emoji (U+1F000-U+1FFFF), skin tones, ZWJ sequences, BMP symbols.
+const EMOJI_SEQ_RE = /(?:(?:\uD83C[\uDDE0-\uDDFF]){2}|(?:\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDC00-\uDFFF])️?(?:\uD83C[\uDFFB-\uDFFF])?(?:‍(?:\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDC00-\uDFFF]|[☀-➿⌀-⏿■-➿])️?(?:\uD83C[\uDFFB-\uDFFF])?)*|[↔-↙↩-↪⌚-⌛⏏⏩-⏳⏸-⏺Ⓜ▪-▫▶◀◻-◾☀-☄☎☑☔-☕☘☝☠☢-☣☦☪☮-☯☸-☺♀♂♈-♓♟-♠♣♥-♦♨♻♾-♿⚒-⚗⚙⚛-⚜⚠-⚡⚪-⚫⚰-⚱⚽-⚾⛄-⛅⛎-⛏⛑⛓-⛔⛩-⛪⛰-⛵⛷-⛺⛽✂✅✈-✍✏✒✔✖✝✡✨✳-✴❄❇❌❎❓-❕❗❣-❤➕-➗➡➰➿⤴-⤵⬅-⬇⬛-⬜⭐⭕〰〽㊗㊙]️?)/g;
 
 // Returns true if the text contains ONLY emoji (and whitespace)
 export function isEmojiOnly(text) {
   const t = String(text || '').trim();
   if (!t) return false;
-  return t.replace(EMOJI_SEQ_RE, '').trim().length === 0;
+  return t.replace(new RegExp(EMOJI_SEQ_RE.source, 'g'), '').trim().length === 0;
 }
 
 // Counts emoji sequences in a string
 export function countEmoji(text) {
-  return (String(text || '').match(EMOJI_SEQ_RE) || []).length;
+  return (String(text || '').match(new RegExp(EMOJI_SEQ_RE.source, 'g')) || []).length;
 }
 
 export function formatMessagePreview(text) {
@@ -49,7 +50,7 @@ export function linkifyHtml(text) {
 
 // Like linkifyHtml but also wraps emoji sequences with <span class="inline-emoji"> for size boost
 function wrapInlineEmoji(text) {
-  const re = new RegExp(EMOJI_SEQ_RE.source, 'gu');
+  const re = new RegExp(EMOJI_SEQ_RE.source, 'g');
   let result = '';
   let lastIndex = 0;
   let match;

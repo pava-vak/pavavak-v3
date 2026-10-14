@@ -49,7 +49,7 @@ function renderMobileBottomNav(user, mobileTab, totalUnread, canInstall) {
   `;
 }
 
-function renderAuthenticatedView(user, chatState, peopleState, adminState, activeChat, threadState, composerValue = '', isMonitoring = false, viewOnce = false, deleteAfter = 'never', mobileTab = 'chats', canInstall = false, onlineUserIds = new Set(), reactions = null, pinnedMessage = null) {
+function renderAuthenticatedView(user, chatState, peopleState, adminState, activeChat, threadState, composerValue = '', isMonitoring = false, viewOnce = false, deleteAfter = 'never', mobileTab = 'chats', canInstall = false, onlineUserIds = new Set(), reactions = null, pinnedMessage = null, threadSearch = null) {
   const socketStatus = getSocketStatus();
   const avatarLetter = escapeHtml((user.displayName || user.username || '?').slice(0, 1).toUpperCase());
   const totalUnread = chatState.items.reduce((n, c) => n + (c.unreadCount || 0), 0);
@@ -1199,7 +1199,8 @@ export function renderAppShell(root) {
         !!installPrompt,
         onlineUserIds,
         reactions,
-        pinnedMessage
+        pinnedMessage,
+        threadSearch
       ) + (settingsOpen ? renderSettingsModal(sessionState.user, biometricEnrolled) : '')
         + (showInstallBanner ? renderInstallBanner() : '')
         + (searchOpen ? renderGlobalSearch(searchQuery, searchResults, searchLoading) : '')

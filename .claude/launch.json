@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--prefix", "f3"],
       "port": 3202
+    },
+    {
+      "name": "b3-api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "b3"],
+      "port": 3201
     }
   ]
 }
