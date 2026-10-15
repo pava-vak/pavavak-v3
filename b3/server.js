@@ -8,6 +8,7 @@ const autoDelete = require('./src/jobs/autoDelete');
 const biometricRepo = require('./src/modules/biometric/biometric.repository');
 const sessionsRepo = require('./src/modules/auth/sessions.repository');
 const mediaAccess = require('./src/modules/media/mediaAccess');
+const normalizedChat = require('./src/db/normalizedChat.repository');
 
 let app;
 let io;
@@ -17,6 +18,7 @@ async function start() {
   await app.ready();
   io = attachSocketServer(app.server);
 
+  await normalizedChat.ensureClearedColumn();
   const port = env.PORT;
   await app.listen({ port, host: '0.0.0.0' });
   app.log.info({ port }, 'b3 listening');

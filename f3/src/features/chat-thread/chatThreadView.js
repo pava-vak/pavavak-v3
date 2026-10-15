@@ -497,9 +497,7 @@ export function renderChatThreadView({ activeChat, threadState, composerValue = 
       </p>
     </div>
     <button class="thread-header-action" data-role="open-media-gallery" title="Media gallery" aria-label="Media gallery">🖼</button>
-    <button class="thread-header-action ${threadSearch ? 'active' : ''}" data-role="open-thread-search" title="Search in chat" aria-label="Search messages">🔍</button>
-    ${!readOnly ? `<button class="thread-header-action" data-role="clear-chat" title="Clear chat" aria-label="Clear chat">🗑</button>` : ''}
-  `;
+    <button class="thread-header-action ${threadSearch ? 'active' : ''}" data-role="open-thread-search" title="Search in chat" aria-label="Search messages">🔍</button>  `;
 
   const monitorBar = readOnly
     ? `<div class="monitor-bar"><span class="monitor-bar-eye">👁</span> Monitoring — read only</div>`
@@ -1058,7 +1056,7 @@ function openScheduleModal(text, onScheduleMessage) {
   });
 }
 
-export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRetry, onBack, onOpenViewOnce, onToggleViewOnce, onSetDeleteAfter, onScheduleMessage, onDeleteMessage, onClearChat, onReact, onPin, onUnpin, onForwardMessage, onCreatePoll, onStarMessage, chatId, chatTitle, isMonitoring, currentUserId }) {
+export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRetry, onBack, onOpenViewOnce, onToggleViewOnce, onSetDeleteAfter, onScheduleMessage, onDeleteMessage, onReact, onPin, onUnpin, onForwardMessage, onCreatePoll, onStarMessage, chatId, chatTitle, isMonitoring, currentUserId }) {
   const form = root.querySelector('[data-role="thread-form"]');
   const input = root.querySelector('[data-role="composer-input"]');
 
@@ -1988,7 +1986,6 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
     });
   });
 
-  root.querySelector('[data-role="clear-chat"]')?.addEventListener('click', () => onClearChat?.());
 
   root.querySelectorAll('[data-role="sys-update-reload"]').forEach((btn) => {
     btn.addEventListener('click', () => window.location.reload());

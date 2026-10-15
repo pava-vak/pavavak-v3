@@ -266,7 +266,7 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
            else 'sent'
          end as status
        from v3_messages msg
-       join v3_message_receipts r on r.message_id = msg.message_id and r.user_id = $1
+       join v3_message_receipts r on r.message_id = msg.message_id and r.user_id = $1 and r.cleared_at is null
        left join v3_users sender on sender.user_id = msg.sender_id
        left join v3_polls p on p.message_id = msg.message_id
        left join lateral (
@@ -533,7 +533,7 @@ async function markRead(user, chatId, messageId) {
       `select count(*)::int as count
        from v3_message_receipts r
        join v3_messages msg on msg.message_id = r.message_id
-       where r.user_id = $1 and msg.conversation_id = $2 and r.read_at is null and msg.sender_id != $1`,
+       where r.user_id = $1 and msg.conversation_id = $2 and r.read_at is null and r.cleared_at is null and msg.sender_id != $1`,
       [user.userId, chatId]
     );
     const unreadCount = unread.rows[0].count;
@@ -764,7 +764,14 @@ async function getConversationMemberUserIds(chatId) {
   return result.rows.map((row) => Number(row.user_id));
 }
 
-async function deleteConversation(user, chatId) {
+async function ensureClearedColumn() {
+  if (!env.DATABASE_URL) return;
+  await getPool().query('alter table v3_message_receipts add column if not exists cleared_at timestamptz');
+}
+
+// Clearing / deleting a chat only hides the caller's copy (their receipts).
+// Messages stay for other members and for admin monitoring.
+async function hideChatForUser(user, chatId, { removeFromList }) {
   const db = getPool();
   const access = await db.query(
     'select 1 from v3_conversation_members where conversation_id = $1 and user_id = $2 limit 1',
@@ -777,13 +784,24 @@ async function deleteConversation(user, chatId) {
   try {
     await client.query('begin');
     await client.query(
-      'delete from v3_message_receipts where message_id in (select message_id from v3_messages where conversation_id = $1)',
-      [chatId]
+      `update v3_message_receipts set cleared_at = now()
+       where user_id = $2 and cleared_at is null
+         and message_id in (select message_id from v3_messages where conversation_id = $1)`,
+      [chatId, user.userId]
     );
-    await client.query('delete from v3_messages where conversation_id = $1', [chatId]);
-    await client.query('delete from v3_user_chat_summaries where conversation_id = $1', [chatId]);
-    await client.query('delete from v3_conversation_members where conversation_id = $1', [chatId]);
-    await client.query('delete from v3_conversations where conversation_id = $1', [chatId]);
+    if (removeFromList) {
+      await client.query(
+        'delete from v3_user_chat_summaries where conversation_id = $1 and user_id = $2',
+        [chatId, user.userId]
+      );
+    } else {
+      await client.query(
+        `update v3_user_chat_summaries
+         set last_message_preview = null, unread_count = 0, updated_at = now()
+         where conversation_id = $1 and user_id = $2`,
+        [chatId, user.userId]
+      );
+    }
     await client.query('commit');
   } catch (err) {
     await client.query('rollback');
@@ -793,36 +811,12 @@ async function deleteConversation(user, chatId) {
   }
 }
 
+async function deleteConversation(user, chatId) {
+  return hideChatForUser(user, chatId, { removeFromList: true });
+}
+
 async function clearChatMessages(user, chatId) {
-  const db = getPool();
-  const access = await db.query(
-    'select 1 from v3_conversation_members where conversation_id = $1 and user_id = $2 limit 1',
-    [chatId, user.userId]
-  );
-  if (access.rowCount === 0) {
-    throw Object.assign(new Error('Access denied'), { status: 403 });
-  }
-  const client = await db.connect();
-  try {
-    await client.query('begin');
-    await client.query(
-      'delete from v3_message_receipts where message_id in (select message_id from v3_messages where conversation_id = $1)',
-      [chatId]
-    );
-    await client.query('delete from v3_messages where conversation_id = $1', [chatId]);
-    await client.query(
-      `update v3_user_chat_summaries
-       set last_message_preview = null, last_message_at = null, unread_count = 0, updated_at = now()
-       where conversation_id = $1`,
-      [chatId]
-    );
-    await client.query('commit');
-  } catch (err) {
-    await client.query('rollback');
-    throw err;
-  } finally {
-    client.release();
-  }
+  return hideChatForUser(user, chatId, { removeFromList: false });
 }
 
 async function deleteMessage(user, messageId) {
@@ -919,5 +913,6 @@ module.exports = {
   clearChatMessages,
   deleteMessage,
   deleteConversation,
+  ensureClearedColumn,
   broadcastSystemUpdate
 };

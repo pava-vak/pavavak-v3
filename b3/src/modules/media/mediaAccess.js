@@ -40,7 +40,7 @@ async function canAccessFile(userId, fileId) {
   const { rows: indexed } = await db.query(
     `select 1 from v3_message_media mm
      join v3_messages m on m.message_id = mm.message_id
-     join v3_message_receipts r on r.message_id = m.message_id and r.user_id = $2
+     join v3_message_receipts r on r.message_id = m.message_id and r.user_id = $2 and r.cleared_at is null
      join v3_conversation_members cm on cm.conversation_id = m.conversation_id and cm.user_id = $2
      where mm.file_id = $1 and m.deleted_at is null
        and (m.expires_at is null or m.expires_at > now())
@@ -52,7 +52,7 @@ async function canAccessFile(userId, fileId) {
   // Forwarded copies are not in v3_message_media, so match on the message body
   const { rows: byBody } = await db.query(
     `select 1 from v3_messages m
-     join v3_message_receipts r on r.message_id = m.message_id and r.user_id = $1
+     join v3_message_receipts r on r.message_id = m.message_id and r.user_id = $1 and r.cleared_at is null
      join v3_conversation_members cm on cm.conversation_id = m.conversation_id and cm.user_id = $1
      where m.deleted_at is null
        and (m.expires_at is null or m.expires_at > now())

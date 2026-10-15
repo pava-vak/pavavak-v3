@@ -33,7 +33,7 @@ async function getMessageConversation(db, messageId, userId) {
     `select m.conversation_id, m.sender_id, m.body, m.view_once, m.expires_at
      from v3_messages m
      join v3_conversation_members cm on cm.conversation_id=m.conversation_id and cm.user_id=$2
-     join v3_message_receipts r on r.message_id=m.message_id and r.user_id=$2
+     join v3_message_receipts r on r.message_id=m.message_id and r.user_id=$2 and r.cleared_at is null
      where m.message_id=$1 and m.deleted_at is null
        and (m.expires_at is null or m.expires_at > now()) limit 1`,
     [messageId, userId]
@@ -290,7 +290,7 @@ function registerFeatureRoutes(app) {
            and m.conversation_id=c.conversation_id
            and m.deleted_at is null and not m.view_once
            and (m.expires_at is null or m.expires_at > now())
-         join v3_message_receipts r on r.message_id=m.message_id and r.user_id=$2
+         join v3_message_receipts r on r.message_id=m.message_id and r.user_id=$2 and r.cleared_at is null
          left join v3_users u on u.user_id=m.sender_id
          where c.conversation_id=$1`,
         [request.params.chatId, request.auth.userId]
@@ -396,7 +396,7 @@ function registerFeatureRoutes(app) {
          from v3_messages m
          join v3_conversations c on c.conversation_id=m.conversation_id
          join v3_conversation_members cm on cm.conversation_id=m.conversation_id and cm.user_id=$1
-         join v3_message_receipts r on r.message_id=m.message_id and r.user_id=$1
+         join v3_message_receipts r on r.message_id=m.message_id and r.user_id=$1 and r.cleared_at is null
          join v3_users u on u.user_id=m.sender_id
          where ${whereClause} and m.deleted_at is null and not m.view_once
            and (m.expires_at is null or m.expires_at > now())
@@ -759,7 +759,7 @@ function registerFeatureRoutes(app) {
          and ($3::bigint is null or (
            not msg.view_once
            and (msg.expires_at is null or msg.expires_at > now())
-           and exists (select 1 from v3_message_receipts r where r.message_id = msg.message_id and r.user_id = $3::bigint)))
+           and exists (select 1 from v3_message_receipts r where r.message_id = msg.message_id and r.user_id = $3::bigint and r.cleared_at is null)))
          and (msg.body like '__IMG__%' or msg.body like '__VID__%' or msg.body like '__AUD__%' or msg.body like '__DOC__%')
          ${cursorClause}
        order by msg.created_at desc, msg.message_id desc
@@ -817,7 +817,7 @@ function registerFeatureRoutes(app) {
       const { rows } = await db.query(
         `select m.message_id from v3_messages m
          join v3_conversation_members cm on cm.conversation_id = m.conversation_id and cm.user_id = $1
-         join v3_message_receipts r on r.message_id = m.message_id and r.user_id = $1
+         join v3_message_receipts r on r.message_id = m.message_id and r.user_id = $1 and r.cleared_at is null
          where m.message_id = $2 and m.deleted_at is null and not m.view_once limit 1`,
         [request.auth.userId, request.params.messageId]
       );
@@ -860,6 +860,7 @@ function registerFeatureRoutes(app) {
          join v3_messages m on m.message_id = s.message_id
          join v3_conversations c on c.conversation_id = m.conversation_id
          join v3_conversation_members cm on cm.conversation_id = m.conversation_id and cm.user_id = $1
+         join v3_message_receipts r on r.message_id = m.message_id and r.user_id = $1 and r.cleared_at is null
          join v3_users u on u.user_id = m.sender_id
          where s.user_id = $1 and m.deleted_at is null
            and (m.expires_at is null or m.expires_at > now())

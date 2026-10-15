@@ -1334,7 +1334,7 @@ export function renderAppShell(root) {
         onOpenChat: openChat,
         onRetry: () => chatListStore.load(),
         onDeleteChat: (chatId) => {
-          showConfirm('Delete this chat? All messages will be lost for everyone.', () => {
+          showConfirm('Delete this chat from your list? The other person keeps their copy.', () => {
             chatListStore.deleteChat(chatId).then(() => {
               if (activeChat?.chatId === chatId) {
                 activeChat = null;
@@ -1385,11 +1385,6 @@ export function renderAppShell(root) {
           root.querySelector('[data-role="composer-input"]').value = '';
         },
         onDeleteMessage: (messageId) => chatThreadStore.deleteMessage(messageId).catch(() => {}),
-        onClearChat: () => {
-          showConfirm('Clear all messages in this chat? This cannot be undone.', () => {
-            chatThreadStore.clearChat().catch(() => {});
-          });
-        },
         onReact: async (messageId, emoji) => {
           if (!activeChat) return;
           try {
@@ -1641,7 +1636,7 @@ export function renderAppShell(root) {
         });
 
         root.querySelector('[data-role="cip-clear"]')?.addEventListener('click', () => {
-          showConfirm('Clear all messages in this chat? This cannot be undone.', () => {
+          showConfirm('Clear messages from your view? The other person keeps their copy.', () => {
             chatThreadStore.clearChat().catch(() => {});
             chatInfoOpen = false;
             render();
