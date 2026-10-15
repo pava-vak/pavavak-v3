@@ -462,7 +462,7 @@ export function renderAppShell(root) {
   }
 
   // Auto-fire biometric on load if enrolled
-  if (appLocked && biometricEnrolled) {
+  if (appLocked && biometricEnrolled && sessionState.tokensPresent) {
     biometricFiring = true;
     verify().then(() => {
       biometricFiring = false;
@@ -568,6 +568,18 @@ export function renderAppShell(root) {
         render();
       }
     }
+  });
+
+  // Android snapshots the last painted frame when leaving the app; `blur` fires while
+  // the page is still visible, so the cover gets painted before the snapshot.
+  const isTouchDevice = window.matchMedia?.('(pointer: coarse)').matches;
+  window.addEventListener('blur', () => {
+    if (isTouchDevice && isLockEnabled() && getLockTimer() === 0 && sessionState.status === 'authenticated') {
+      ensureSplash();
+    }
+  });
+  window.addEventListener('focus', () => {
+    if (!appLocked && !document.hidden) removeSplash();
   });
 
   ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => {
@@ -1019,7 +1031,9 @@ export function renderAppShell(root) {
     document.documentElement.removeAttribute('data-locked');
     const el = document.getElementById('app-lock-splash');
     if (!el) return;
-    requestAnimationFrame(() => requestAnimationFrame(() => el.remove()));
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!document.documentElement.hasAttribute('data-locked')) el.remove();
+    }));
   }
 
   function render() {

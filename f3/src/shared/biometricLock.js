@@ -89,6 +89,18 @@ export async function isPlatformAvailable() {
 
 const ENROLLED_CACHE = 'pava-bio-enrolled';
 const ENABLED_KEY = 'pava-app-lock-enabled';
+const CRED_ID_KEY = 'pava-bio-cred-id';
+const RP_ID_KEY = 'pava-bio-rp-id';
+
+function cacheCredential(credentialId, rpId) {
+  if (credentialId) localStorage.setItem(CRED_ID_KEY, credentialId);
+  if (rpId) localStorage.setItem(RP_ID_KEY, rpId);
+}
+
+function clearCachedCredential() {
+  localStorage.removeItem(CRED_ID_KEY);
+  localStorage.removeItem(RP_ID_KEY);
+}
 
 // Quick sync check from local cache (use to avoid a network hit on boot)
 export function hasEnrolledLocally() {
@@ -123,22 +135,56 @@ export async function enroll() {
   await biometricEnrollFinish(serializeCredential(credential));
   localStorage.setItem(ENROLLED_CACHE, '1');
   localStorage.setItem(ENABLED_KEY, 'true');
+  cacheCredential(credential.id, options.rp?.id);
 }
 
 // ── Verify (unlock) ───────────────────────────────────────────────────────────
 
-export async function verify() {
-  const { options } = await biometricVerifyStart();
-  if (!options) throw new Error('No authentication options from server');
+let pendingUnlock = null;
 
-  let assertion;
+// Concurrent callers (cold start, resume, retry button) share one OS prompt.
+export function verify() {
+  if (!pendingUnlock) {
+    const run = localStorage.getItem(CRED_ID_KEY) ? verifyOnDevice : verifyWithServer;
+    pendingUnlock = run().finally(() => { pendingUnlock = null; });
+  }
+  return pendingUnlock;
+}
+
+async function getAssertion(publicKey) {
   try {
-    assertion = await navigator.credentials.get({ publicKey: prepareRequestOptions(options) });
+    return await navigator.credentials.get({ publicKey });
   } catch (err) {
     throw new Error(err.name === 'NotAllowedError' ? 'Biometric cancelled' : err.message);
   }
+}
 
+// The app lock guards an already-signed-in device, so the OS user-verification
+// result is what matters; checking it locally avoids two network round trips.
+async function verifyOnDevice() {
+  const rpId = localStorage.getItem(RP_ID_KEY);
+  const assertion = await getAssertion({
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    allowCredentials: [{
+      type: 'public-key',
+      id: base64urlToUint8Array(localStorage.getItem(CRED_ID_KEY)),
+      transports: ['internal']
+    }],
+    userVerification: 'required',
+    timeout: 60000,
+    ...(rpId ? { rpId } : {})
+  });
+  const flags = new Uint8Array(assertion.response.authenticatorData)[32];
+  if (!(flags & 0x04)) throw new Error('Biometric not verified');
+}
+
+async function verifyWithServer() {
+  const { options } = await biometricVerifyStart();
+  if (!options) throw new Error('No authentication options from server');
+
+  const assertion = await getAssertion(prepareRequestOptions(options));
   await biometricVerifyFinish(serializeCredential(assertion));
+  cacheCredential(options.allowCredentials?.[0]?.id, options.rpId);
 }
 
 // ── Revoke ────────────────────────────────────────────────────────────────────
@@ -146,6 +192,7 @@ export async function verify() {
 export async function revoke() {
   await biometricRevoke();
   localStorage.removeItem(ENROLLED_CACHE);
+  clearCachedCredential();
 }
 
 // ── Lock state ────────────────────────────────────────────────────────────────
@@ -159,6 +206,7 @@ export function disable() {
   localStorage.removeItem('pava-pin-hash');
   localStorage.removeItem('pava-pin-salt');
   localStorage.removeItem(ENROLLED_CACHE);
+  clearCachedCredential();
 }
 
 export function getLockTimer() {
