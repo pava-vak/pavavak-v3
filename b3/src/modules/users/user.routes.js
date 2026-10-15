@@ -34,11 +34,12 @@ function registerUserRoutes(app) {
       return { success: true, items: [] };
     }
 
-    const items = await identity.listUsers({
+    const users = await identity.listUsers({
       query: parsed.data.q,
       excludeUserId: request.auth.userId,
       limit: 30
     });
+    const items = users.map(({ userId, username, displayName }) => ({ userId, username, displayName }));
     return { success: true, items };
   });
 

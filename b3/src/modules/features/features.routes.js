@@ -25,7 +25,18 @@ async function getMemberIds(db, conversationId) {
     'select user_id from v3_conversation_members where conversation_id=$1',
     [conversationId]
   );
-  return rows.map(r => r.user_id);
+  return rows.map(r => Number(r.user_id));
+}
+
+// Current members who still hold this message (not joined later, not cleared)
+async function getMessageRecipientIds(db, messageId, conversationId) {
+  const { rows } = await db.query(
+    `select r.user_id from v3_message_receipts r
+     join v3_conversation_members cm on cm.conversation_id=$2 and cm.user_id=r.user_id
+     where r.message_id=$1 and r.cleared_at is null`,
+    [messageId, conversationId]
+  );
+  return rows.map(r => Number(r.user_id));
 }
 
 async function getMessageConversation(db, messageId, userId) {
@@ -109,7 +120,7 @@ function registerFeatureRoutes(app) {
     const db = getPool();
     try {
       const msg = await getMessageConversation(db, request.params.messageId, request.auth.userId);
-      const memberIds = await getMemberIds(db, msg.conversation_id);
+      const memberIds = await getMessageRecipientIds(db, request.params.messageId, msg.conversation_id);
       // Toggle: if same emoji exists, remove; otherwise upsert
       const existing = await db.query(
         'select emoji from v3_message_reactions where message_id=$1 and user_id=$2',
@@ -162,8 +173,9 @@ function registerFeatureRoutes(app) {
          from v3_message_reactions r
          join v3_users u on u.user_id=r.user_id
          join v3_messages m on m.message_id=r.message_id
+         join v3_message_receipts mine on mine.message_id=m.message_id and mine.user_id=$2 and mine.cleared_at is null
          where m.conversation_id=$1`,
-        [request.params.chatId]
+        [request.params.chatId, request.auth.userId]
       );
       // Group by message
       const byMessage = {};
@@ -184,14 +196,16 @@ function registerFeatureRoutes(app) {
     const db = getPool();
     try {
       const msg = await getMessageConversation(db, request.params.messageId, request.auth.userId);
-      if (msg.sender_id !== request.auth.userId)
+      if (Number(msg.sender_id) !== Number(request.auth.userId))
         return reply.status(403).send({ success: false, error: 'Cannot edit another person\'s message' });
+      if (/^__[A-Z]+__:/.test(text) || /^__[A-Z]+__:/.test(msg.body || '') || msg.view_once)
+        return reply.status(400).send({ success: false, error: 'Only text messages can be edited' });
       await db.query(
         'update v3_messages set body=$1, edited_at=now() where message_id=$2',
         [text, request.params.messageId]
       );
-      const memberIds = await getMemberIds(db, msg.conversation_id);
-      realtime.emitMessageEditedToMembers(msg.conversation_id, request.params.messageId, text, new Date().toISOString(), memberIds);
+      const recipientIds = await getMessageRecipientIds(db, request.params.messageId, msg.conversation_id);
+      realtime.emitMessageEditedToMembers(msg.conversation_id, request.params.messageId, text, new Date().toISOString(), recipientIds);
       return { success: true };
     } catch (err) {
       return reply.status(err.status || 500).send({ success: false, error: err.status ? err.message : 'Internal server error' });
