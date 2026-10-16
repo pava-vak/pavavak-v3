@@ -19,12 +19,12 @@ async function start() {
   io = attachSocketServer(app.server);
 
   await normalizedChat.ensureClearedColumn();
+  await mediaAccess.ensureTable();
   const port = env.PORT;
   await app.listen({ port, host: '0.0.0.0' });
   app.log.info({ port }, 'b3 listening');
   await biometricRepo.ensureTable();
   await sessionsRepo.ensureTable();
-  await mediaAccess.ensureTable();
   scheduledMessages.start();
   autoDelete.start();
 }

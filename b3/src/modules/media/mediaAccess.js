@@ -11,12 +11,38 @@ function fileIdFromBody(text) {
 
 async function ensureTable() {
   if (!env.DATABASE_URL) return;
-  await getPool().query(`
+  const db = getPool();
+  await db.query(`
     CREATE TABLE IF NOT EXISTS v3_media_uploads (
       file_id     TEXT PRIMARY KEY,
       uploaded_by BIGINT NOT NULL,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+  // Same as sql/012 (never applied in some environments), with a backfill that also covers documents
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS v3_message_media (
+      file_id         TEXT        NOT NULL PRIMARY KEY,
+      message_id      TEXT        NOT NULL REFERENCES v3_messages(message_id) ON DELETE CASCADE,
+      conversation_id TEXT        NOT NULL REFERENCES v3_conversations(conversation_id) ON DELETE CASCADE,
+      uploaded_by     BIGINT      NOT NULL REFERENCES v3_users(user_id),
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await db.query('CREATE INDEX IF NOT EXISTS idx_v3_message_media_conv ON v3_message_media(conversation_id)');
+  await db.query('CREATE INDEX IF NOT EXISTS idx_v3_message_media_msg ON v3_message_media(message_id)');
+  await db.query(`
+    INSERT INTO v3_message_media (file_id, message_id, conversation_id, uploaded_by)
+    SELECT DISTINCT ON (file_id) file_id, message_id, conversation_id, sender_id
+    FROM (
+      SELECT substring(body FROM '^__(?:IMG|VID|AUD|DOC)__:([^:]+)') AS file_id,
+             message_id, conversation_id, sender_id, created_at
+      FROM v3_messages
+      WHERE body ~ '^__(IMG|VID|AUD|DOC)__:' AND deleted_at IS NULL
+    ) m
+    WHERE file_id IS NOT NULL
+    ORDER BY file_id, created_at
+    ON CONFLICT (file_id) DO NOTHING
   `);
 }
 
