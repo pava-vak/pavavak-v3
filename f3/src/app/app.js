@@ -761,48 +761,72 @@ export function renderAppShell(root) {
     }
   }
 
-  function _doScroll(container) {
-    // Double-rAF: first frame commits DOM, second fires after layout is computed
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      container.scrollTo({ top: container.scrollHeight, behavior: 'instant' });
-    }));
-    // Re-scroll after any images in the thread finish loading (they inflate scrollHeight)
-    container.querySelectorAll('img:not([data-scroll-watched])').forEach(img => {
-      img.dataset.scrollWatched = '1';
-      if (!img.complete) {
-        img.addEventListener('load', () => {
-          const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
-          if (atBottom) container.scrollTo({ top: container.scrollHeight, behavior: 'instant' });
-        }, { once: true });
-      }
-    });
+  // Every render() rebuilds the thread DOM, so scroll state lives here, not in the element.
+  let _threadPinned = true; // user is at (or near) the newest message
+  let _threadScrollMemo = null; // { chatId, scrollTop, scrollHeight } of the previous DOM
+  let _threadResizeObs = null;
+
+  function captureThreadScroll() {
+    const c = root.querySelector('[data-role="thread-messages"]');
+    _threadScrollMemo = c ? { chatId: _lastScrollChatId, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight } : null;
+  }
+
+  function stickToBottom(container) {
+    container.scrollTop = container.scrollHeight;
+    requestAnimationFrame(() => { if (_threadPinned) container.scrollTop = container.scrollHeight; });
   }
 
   function scrollThreadToBottom() {
+    _threadResizeObs?.disconnect();
     const container = root.querySelector('[data-role="thread-messages"]');
     if (!container) return;
     const chatId = threadState?.chatId;
-    const itemCount = threadState?.items?.length || 0;
+    const items = threadState?.items || [];
     const chatChanged = chatId !== _lastScrollChatId;
-    const newItems = itemCount > _lastScrollItemCount;
+    const addedCount = items.length - _lastScrollItemCount;
+    const memo = _threadScrollMemo?.chatId === chatId ? _threadScrollMemo : null;
     _lastScrollChatId = chatId;
-    _lastScrollItemCount = itemCount;
+    _lastScrollItemCount = items.length;
+    if (_loadingMore && addedCount <= 0 && threadState?.loadMoreStatus !== 'loading') _loadingMore = false;
 
-    if (chatChanged) {
-      // Always scroll to bottom when opening a different chat
-      unreadScrollCount = 0;
-      syncScrollBtn(false);
+    if (chatChanged || !memo) {
+      _threadPinned = true;
       _loadingMore = false;
-      _doScroll(container);
-    } else if (newItems && !_loadingMore) {
-      // New messages sent/received → always scroll to bottom
       unreadScrollCount = 0;
       syncScrollBtn(false);
-      _doScroll(container);
+      stickToBottom(container);
+    } else if (addedCount > 0 && _loadingMore) {
+      // Older messages were prepended: keep the message the user was reading in place
+      _loadingMore = false;
+      container.scrollTop = container.scrollHeight - memo.scrollHeight + memo.scrollTop;
+    } else if (addedCount > 0 && (_threadPinned || items[items.length - 1]?.direction === 'outgoing')) {
+      _threadPinned = true;
+      unreadScrollCount = 0;
+      syncScrollBtn(false);
+      stickToBottom(container);
+    } else if (addedCount > 0) {
+      container.scrollTop = memo.scrollTop;
+      unreadScrollCount += addedCount;
+      syncScrollBtn(true);
+    } else if (_threadPinned) {
+      stickToBottom(container);
+    } else {
+      container.scrollTop = memo.scrollTop;
     }
-    // If _loadingMore (loading older messages), don't scroll — let the browser
-    // stay at the top of the newly loaded batch so the user can read them.
-    if (_loadingMore) _loadingMore = false;
+
+    container.addEventListener('scroll', () => {
+      _threadPinned = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+    }, { passive: true });
+
+    // Photos/videos loading and the keyboard opening both change sizes after render;
+    // while pinned, keep the newest message in view.
+    if (window.ResizeObserver) {
+      _threadResizeObs = new ResizeObserver(() => {
+        if (_threadPinned) container.scrollTop = container.scrollHeight;
+      });
+      _threadResizeObs.observe(container);
+      for (const child of container.children) _threadResizeObs.observe(child);
+    }
   }
 
   function syncScrollBtn(show) {
@@ -1038,6 +1062,7 @@ export function renderAppShell(root) {
 
   function render() {
     const composerSnapshot = captureComposerState();
+    captureThreadScroll();
 
     if (appLocked && sessionState.status === 'loading') {
       return;
