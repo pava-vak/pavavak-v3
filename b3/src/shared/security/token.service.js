@@ -25,7 +25,9 @@ async function signRefreshToken(user) {
   return new SignJWT({
     ...baseClaims(user),
     tokenType: 'refresh',
-    tv: Number(user.tokenVersion || 0)
+    tv: Number(user.tokenVersion || 0),
+    // Ties the refresh token to its user_sessions row so refresh reuses it and revocation works
+    ...(user.sid ? { sid: String(user.sid) } : {})
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setIssuedAt()

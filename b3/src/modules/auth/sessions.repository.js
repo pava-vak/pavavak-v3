@@ -74,6 +74,7 @@ async function deleteAllSessions(userId) {
 
 function guessDeviceName(ua) {
   if (!ua) return 'Unknown device';
+  if (/PaVaVak-Android/i.test(ua)) return 'PaVa Android app';
   if (/iPhone/i.test(ua)) return 'iPhone';
   if (/iPad/i.test(ua)) return 'iPad';
   if (/Android/i.test(ua)) {
