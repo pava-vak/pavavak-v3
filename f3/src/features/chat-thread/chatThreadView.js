@@ -1804,12 +1804,8 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
         } else if (action === 'star') {
           onStarMessage?.(messageId);
         } else if (action === 'delete') {
-          if (btn.dataset.confirm === '1') {
-            onDeleteMessage?.(messageId);
-          } else {
-            btn.dataset.confirm = '1';
-            btn.textContent = 'Confirm';
-          }
+          // The menu is already closed, so confirm with a dialog rather than a second tap on the item
+          if (window.confirm('Delete this message for everyone?')) onDeleteMessage?.(messageId);
         }
       });
     });

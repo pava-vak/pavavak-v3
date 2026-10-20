@@ -28,6 +28,9 @@ export function formatMessagePreview(text) {
   if (text === '__SYS_UPDATE__') return '🔄 App update';
   if (text.startsWith('__IMG__:')) return '📷 Image';
   if (text.startsWith('__VID__:')) return '🎥 Video';
+  if (text.startsWith('__AUD__:')) return '🎤 Voice note';
+  if (text.startsWith('__DOC__:')) return `📄 ${text.slice(8).split(':').slice(1).join(':') || 'Document'}`;
+  if (text.startsWith('__POLL__:')) return '📊 Poll';
   if (text.startsWith('> ')) {
     const nl = text.indexOf('\n');
     return nl !== -1 ? text.slice(nl + 1).trim() : text;

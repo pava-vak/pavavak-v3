@@ -176,9 +176,9 @@ function renderMonitorMessages(state) {
         ${!monitorLoading && monitorMessages.length === 0 ? '<p class="ap-empty">No messages in this conversation.</p>' : ''}
         ${monitorMessages.map((m) => `
           <div class="ap-monitor-msg">
-            <span class="ap-monitor-sender">${escapeHtml(m.senderName || String(m.senderId) || '?')}</span>
+            <span class="ap-monitor-sender">${escapeHtml(m.senderDisplayName || m.senderName || '?')}</span>
             <span class="ap-monitor-text">${escapeHtml(m.text || '')}</span>
-            <span class="ap-monitor-time">${formatTime(m.createdAt)}</span>
+            <span class="ap-monitor-time">${formatTime(m.sentAt || m.createdAt)}</span>
           </div>
         `).join('')}
       </div>

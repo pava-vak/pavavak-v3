@@ -18,6 +18,7 @@ import { config } from '../shared/config.js';
 import { getActiveTheme, setTheme } from '../shared/themeStore.js';
 import { initPush, unsubscribePush } from '../shared/pushClient.js';
 import { updateFaviconBadge } from '../shared/faviconBadge.js';
+import { ANDROID_APK_URL, isAndroidBrowser, fetchAndroidRelease, formatReleaseLabel, isAndroidBannerDismissed, dismissAndroidBanner } from '../shared/androidApp.js';
 
 function renderMobileBottomNav(user, mobileTab, totalUnread, canInstall) {
   return `
@@ -99,6 +100,24 @@ function renderAuthenticatedView(user, chatState, peopleState, adminState, activ
       </main>
     </div>
     ${renderMobileBottomNav(user, activeChat ? '' : mobileTab, totalUnread, canInstall)}
+  `;
+}
+
+function renderAndroidAppBanner(release) {
+  return `
+    <div class="pwa-install-banner" role="dialog" aria-label="Get the PaVa Vak Android app">
+      <div class="pwa-install-banner-icon">
+        <img src="/icon.svg" alt="" aria-hidden="true" width="40" height="40" />
+      </div>
+      <div class="pwa-install-banner-body">
+        <strong class="pwa-install-banner-title">Android app</strong>
+        <span class="pwa-install-banner-sub">${escapeHtml(formatReleaseLabel(release))}</span>
+      </div>
+      <div class="pwa-install-banner-actions">
+        <a class="pwa-install-banner-btn pwa-install-banner-btn--install" href="${ANDROID_APK_URL}" download data-role="android-banner-download">Download</a>
+        <button class="pwa-install-banner-btn pwa-install-banner-btn--dismiss" data-role="android-banner-dismiss" aria-label="Dismiss">✕</button>
+      </div>
+    </div>
   `;
 }
 
@@ -430,6 +449,14 @@ export function renderAppShell(root) {
   let mobileTab = 'chats';
   let installPrompt = null;
   let installBannerDismissed = localStorage.getItem('pava-install-dismissed') === '1';
+  let androidRelease = null;
+  let androidBannerDismissed = isAndroidBannerDismissed();
+  if (isAndroidBrowser()) {
+    fetchAndroidRelease().then((release) => {
+      androidRelease = release;
+      if (release && !androidBannerDismissed && sessionState.status === 'authenticated') render();
+    });
+  }
   let appLocked = isLockEnabled();
   let lockError = '';
   let onboarding = null;
@@ -734,11 +761,11 @@ export function renderAppShell(root) {
             <span class="starred-time">${m.sentAt ? new Date(m.sentAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }) : ''}</span>
           </div>
           <p class="starred-text">${escapeHtml(
-            m.body?.startsWith('__IMG__:') ? '📷 Photo' :
-            m.body?.startsWith('__VID__:') ? '▶ Video' :
-            m.body?.startsWith('__AUD__:') ? '🎤 Voice note' :
-            m.body?.startsWith('__DOC__:') ? '📄 Document' :
-            (m.body || '')
+            m.text?.startsWith('__IMG__:') ? '📷 Photo' :
+            m.text?.startsWith('__VID__:') ? '▶ Video' :
+            m.text?.startsWith('__AUD__:') ? '🎤 Voice note' :
+            m.text?.startsWith('__DOC__:') ? '📄 Document' :
+            (m.text || '')
           )}</p>
           <button class="starred-unstar secondary-button" data-role="unstar" data-mid="${escapeHtml(m.messageId)}" title="Remove star">✕ Unstar</button>
         </div>`).join('')}</div>`;
@@ -1219,7 +1246,9 @@ export function renderAppShell(root) {
 
     if (sessionState.status === 'authenticated' && sessionState.user) {
       const { viewOnce, deleteAfter } = chatThreadStore.getState();
-      const showInstallBanner = !!installPrompt && !installBannerDismissed;
+      // On Android the native app replaces "Add to Home Screen"
+      const showAndroidBanner = !!androidRelease && !androidBannerDismissed;
+      const showInstallBanner = !showAndroidBanner && !!installPrompt && !installBannerDismissed;
       removeSplash();
       const _totalUnread = chatState.items.reduce((n, c) => n + (c.unreadCount || 0), 0);
       updateFaviconBadge(_totalUnread);
@@ -1242,6 +1271,7 @@ export function renderAppShell(root) {
         threadSearch
       ) + (settingsOpen ? renderSettingsModal(sessionState.user, biometricEnrolled) : '')
         + (showInstallBanner ? renderInstallBanner() : '')
+        + (showAndroidBanner ? renderAndroidAppBanner(androidRelease) : '')
         + (searchOpen ? renderGlobalSearch(searchQuery, searchResults, searchLoading) : '')
         + (groupModalOpen ? renderGroupCreateModal(groupModalState) : '')
         + (addUserModalOpen ? renderAddUserModal(adminStore.getState()) : '')
@@ -1800,6 +1830,12 @@ export function renderAppShell(root) {
         installBannerDismissed = true;
         render();
       });
+      root.querySelector('[data-role="android-banner-dismiss"]')?.addEventListener('click', () => {
+        androidBannerDismissed = true;
+        dismissAndroidBanner();
+        render();
+      });
+
       root.querySelector('[data-role="pwa-banner-dismiss"]')?.addEventListener('click', () => {
         installBannerDismissed = true;
         localStorage.setItem('pava-install-dismissed', '1');

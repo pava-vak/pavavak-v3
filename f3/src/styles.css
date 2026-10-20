@@ -3108,6 +3108,8 @@ html, body { height: 100%; overscroll-behavior: none; }
   padding: 8px 16px;
 }
 .pwa-install-banner-btn--install:hover { opacity: 0.88; }
+a.pwa-install-banner-btn { text-decoration: none; display: inline-flex; align-items: center; }
+.settings-download-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; text-decoration: none; }
 .pwa-install-banner-btn--dismiss {
   background: transparent;
   color: var(--v3-muted);

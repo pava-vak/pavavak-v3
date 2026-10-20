@@ -2,6 +2,7 @@ import { escapeHtml } from '../../shared/html.js';
 import { changePassword, getSessions, revokeSession, revokeAllSessions } from '../../shared/apiClient.js';
 import { isEnabled as isLockEnabled, hasPin, getLockTimer } from '../../shared/biometricLock.js';
 import { THEMES, getActiveTheme, setTheme } from '../../shared/themeStore.js';
+import { ANDROID_APK_URL, fetchAndroidRelease, formatReleaseLabel } from '../../shared/androidApp.js';
 
 function getLockScreenPrefs() {
   return {
@@ -161,6 +162,13 @@ export function renderSettingsModal(user = {}, biometricEnrolled = false) {
           </section>
 
           <section class="settings-section">
+            <h3 class="settings-section-title">Android App</h3>
+            <p class="settings-section-sub">The native PaVa Vak app for Android phones. Open this on your phone to install it.</p>
+            <a class="secondary-button settings-download-link" href="${ANDROID_APK_URL}" download>📱 Download for Android</a>
+            <p class="settings-section-sub" id="settings-android-version" style="margin-top:6px"></p>
+          </section>
+
+          <section class="settings-section">
             <h3 class="settings-section-title">Starred Messages</h3>
             <p class="settings-section-sub">Messages you've bookmarked across all chats.</p>
             <button class="secondary-button" style="margin-top:8px" data-role="view-starred">⭐ View Starred Messages</button>
@@ -267,6 +275,10 @@ export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onEnable
   root.querySelector('[data-role="settings-close"]')?.addEventListener('click', onClose);
 
   loadSessions(root);
+  fetchAndroidRelease().then((release) => {
+    const el = root.querySelector('#settings-android-version');
+    if (el) el.textContent = release ? formatReleaseLabel(release) : '';
+  });
 
   root.querySelector('[data-role="sign-out-all-devices"]')?.addEventListener('click', async () => {
     if (!confirm('Sign out from all devices? You will be signed out here too.')) return;

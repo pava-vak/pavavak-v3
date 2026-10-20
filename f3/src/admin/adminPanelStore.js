@@ -90,7 +90,7 @@ export function createAdminPanelStore() {
     setState({ monitorChat: chat, monitorMessages: [], monitorLoading: true });
     try {
       const result = await requestAdminThread(chat.chatId);
-      setState({ monitorMessages: result.messages || [], monitorLoading: false });
+      setState({ monitorMessages: result.items || result.messages || [], monitorLoading: false });
     } catch {
       setState({ monitorLoading: false });
     }
