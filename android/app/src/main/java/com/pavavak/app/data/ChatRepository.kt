@@ -3,16 +3,16 @@ package com.pavavak.app.data
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import java.time.Instant
 import java.util.UUID
 
@@ -38,10 +38,14 @@ data class ThreadState(
     val error: String? = null,
 )
 
+data class IncomingEvent(val chatId: String, val message: Message, val chatOpen: Boolean)
+
 class ChatRepository(
-    private val api: ApiClient,
+    val api: ApiClient,
     private val store: SecureStore,
     private val realtime: RealtimeClient,
+    val media: MediaRepository,
+    private val lock: AppLock,
     private val scope: CoroutineScope,
 ) {
     private val _session = MutableStateFlow<SessionState>(SessionState.Loading)
@@ -56,9 +60,29 @@ class ChatRepository(
     private val _typing = MutableStateFlow<Map<String, String>>(emptyMap())
     val typing: StateFlow<Map<String, String>> = _typing
 
+    /** chatId -> messageId -> reactions */
+    private val _reactions = MutableStateFlow<Map<String, Map<String, List<Reaction>>>>(emptyMap())
+    val reactions: StateFlow<Map<String, Map<String, List<Reaction>>>> = _reactions
+
+    private val _pinned = MutableStateFlow<Map<String, PinnedMessage?>>(emptyMap())
+    val pinned: StateFlow<Map<String, PinnedMessage?>> = _pinned
+
+    private val _online = MutableStateFlow<Set<Long>>(emptySet())
+    val online: StateFlow<Set<Long>> = _online
+
+    private val _lastSeen = MutableStateFlow<Map<Long, String?>>(emptyMap())
+    val lastSeen: StateFlow<Map<Long, String?>> = _lastSeen
+
+    private val _incoming = MutableSharedFlow<IncomingEvent>(extraBufferCapacity = 32)
+    val incoming: SharedFlow<IncomingEvent> = _incoming
+
+    private val linkPreviews = HashMap<String, LinkPreview?>()
+
     private var activeChatId: String? = null
     private var inForeground = true
     private val pendingReadJobs = HashMap<String, Job>()
+
+    val currentUser: User? get() = (_session.value as? SessionState.SignedIn)?.user
 
     init {
         api.onSessionExpired = { scope.launch { onSignedOut() } }
@@ -97,6 +121,7 @@ class ChatRepository(
         _session.value = SessionState.SignedIn(result.user)
         realtime.connect()
         refreshChats()
+        scope.launch { runCatching { api.me() }.onSuccess { _session.value = SessionState.SignedIn(it) } }
     }
 
     fun logout() {
@@ -107,6 +132,12 @@ class ChatRepository(
         }
     }
 
+    fun updateDisplayName(name: String, onDone: (String?) -> Unit) = scope.launch {
+        runCatching { api.updateDisplayName(name); api.me() }
+            .onSuccess { _session.value = SessionState.SignedIn(it); onDone(null) }
+            .onFailure { onDone(it.message) }
+    }
+
     private fun onSignedOut() {
         realtime.disconnect()
         activeChatId = null
@@ -115,6 +146,11 @@ class ChatRepository(
         _typing.value = emptyMap()
         _chatList.value = ChatListState()
         _threads.value = emptyMap()
+        _reactions.value = emptyMap()
+        _pinned.value = emptyMap()
+        _online.value = emptySet()
+        media.clear()
+        lock.reset()
         _session.value = SessionState.SignedOut
     }
 
@@ -137,8 +173,9 @@ class ChatRepository(
 
     suspend fun searchUsers(query: String) = api.searchUsers(query)
 
-    private fun sortChats(chats: List<ChatSummary>) =
-        chats.sortedByDescending { it.lastMessage?.sentAt.orEmpty() }
+    fun chat(chatId: String): ChatSummary? = _chatList.value.chats.firstOrNull { it.chatId == chatId }
+
+    private fun sortChats(chats: List<ChatSummary>) = chats.sortedByDescending { it.lastMessage?.sentAt.orEmpty() }
 
     private fun patchChat(chatId: String, transform: (ChatSummary) -> ChatSummary): Boolean {
         var found = false
@@ -146,6 +183,29 @@ class ChatRepository(
             s.copy(chats = sortChats(s.chats.map { if (it.chatId == chatId) { found = true; transform(it) } else it }))
         }
         return found
+    }
+
+    fun setArchived(chatId: String, archived: Boolean) = optimistic(chatId, { it.copy(archived = archived) }) { api.setArchived(chatId, archived) }
+    fun setMuted(chatId: String, muted: Boolean) = optimistic(chatId, { it.copy(muted = muted) }) { api.setMuted(chatId, muted) }
+    fun setBackground(chatId: String, background: String?) =
+        optimistic(chatId, { it.copy(background = background) }) { api.setBackground(chatId, background) }
+
+    private fun optimistic(chatId: String, change: (ChatSummary) -> ChatSummary, call: suspend () -> Unit) {
+        val before = chat(chatId)
+        patchChat(chatId, change)
+        scope.launch { runCatching { call() }.onFailure { if (before != null) patchChat(chatId) { before } } }
+    }
+
+    suspend fun clearChat(chatId: String) {
+        api.clearChat(chatId)
+        updateThread(chatId) { ThreadState() }
+        patchChat(chatId) { it.copy(lastMessage = it.lastMessage?.copy(text = ""), unreadCount = 0) }
+    }
+
+    suspend fun deleteChat(chatId: String) {
+        api.deleteChat(chatId)
+        _chatList.update { s -> s.copy(chats = s.chats.filter { it.chatId != chatId }) }
+        _threads.update { it - chatId }
     }
 
     // ── Thread ──────────────────────────────────────────────────────────────
@@ -165,8 +225,7 @@ class ChatRepository(
                         val overlaps = page.items.any { m -> m.messageId in known }
                         val fresh = it.messages.isEmpty() || (!overlaps && page.page.hasMore)
                         it.copy(
-                            messages = if (fresh) page.items + it.messages.filter { m -> m.messageId.startsWith("local-") }
-                                       else mergeLatest(it.messages, page.items),
+                            messages = if (fresh) page.items + it.messages.filter { m -> m.isLocal } else mergeLatest(it.messages, page.items),
                             hasMore = if (fresh) page.page.hasMore else it.hasMore,
                             nextCursor = if (fresh) page.page.nextCursor else it.nextCursor,
                             loading = false,
@@ -175,6 +234,16 @@ class ChatRepository(
                     if (inForeground && activeChatId == chatId) markReadSoon(chatId)
                 }
                 .onFailure { e -> updateThread(chatId) { it.copy(loading = false, error = e.message) } }
+        }
+        scope.launch { runCatching { api.reactions(chatId) }.onSuccess { r -> _reactions.update { it + (chatId to r) } } }
+        scope.launch { runCatching { api.pinned(chatId) }.onSuccess { p -> _pinned.update { it + (chatId to p) } } }
+        chat(chatId)?.peerUserId?.let { refreshPresence(it) }
+    }
+
+    fun refreshPresence(userId: Long) = scope.launch {
+        runCatching { api.presence(userId) }.onSuccess { p ->
+            _online.update { if (p.online) it + userId else it - userId }
+            _lastSeen.update { it + (userId to p.lastSeenAt) }
         }
     }
 
@@ -196,9 +265,7 @@ class ChatRepository(
                         val known = s.messages.mapTo(HashSet()) { it.messageId }
                         s.copy(
                             messages = page.items.filter { it.messageId !in known } + s.messages,
-                            hasMore = page.page.hasMore,
-                            nextCursor = page.page.nextCursor,
-                            loadingMore = false,
+                            hasMore = page.page.hasMore, nextCursor = page.page.nextCursor, loadingMore = false,
                         )
                     }
                 }
@@ -206,39 +273,151 @@ class ChatRepository(
         }
     }
 
-    fun send(chatId: String, text: String) {
-        val body = text.trim()
-        if (body.isEmpty()) return
+    /** Sends text (optionally a reply, view-once, or auto-deleting) with an optimistic bubble. */
+    fun send(chatId: String, text: String, viewOnce: Boolean = false, deleteAfter: String = "never", replyTo: Message? = null) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        val body = if (replyTo != null) replyBody(replyTo, trimmed) else trimmed
+        sendBody(chatId, body, viewOnce, deleteAfter)
+    }
+
+    fun sendBody(chatId: String, body: String, viewOnce: Boolean = false, deleteAfter: String = "never") {
         val localId = "local-${UUID.randomUUID()}"
-        val pending = Message(
-            messageId = localId, direction = "outgoing", text = body,
-            sentAt = Instant.now().toString(), status = "sending",
-        )
+        val pending = Message(messageId = localId, direction = "outgoing", text = body, sentAt = Instant.now().toString(),
+            status = "sending", viewOnce = viewOnce)
         updateThread(chatId) { it.copy(messages = it.messages + pending) }
         scope.launch {
-            runCatching { api.send(chatId, body) }
-                .onSuccess { sent ->
+            runCatching { api.send(chatId, body, viewOnce, deleteAfter) }
+                .onSuccess { sent -> replaceLocal(chatId, localId, sent) }
+                .onFailure { markFailed(chatId, localId) }
+        }
+    }
+
+    /** Uploads first (bubble shows "Sending photo…"), then sends the media marker body. */
+    fun sendMedia(chatId: String, label: String, viewOnce: Boolean, deleteAfter: String, upload: suspend () -> String) {
+        val localId = "local-${UUID.randomUUID()}"
+        val pending = Message(messageId = localId, direction = "outgoing", text = "$UPLOADING$label",
+            sentAt = Instant.now().toString(), status = "sending")
+        updateThread(chatId) { it.copy(messages = it.messages + pending) }
+        scope.launch {
+            runCatching { val body = upload(); api.send(chatId, body, viewOnce, deleteAfter) }
+                .onSuccess { sent -> replaceLocal(chatId, localId, sent) }
+                .onFailure { e ->
                     updateThread(chatId) { s ->
-                        val withoutLocal = s.messages.filter { it.messageId != localId }
-                        if (withoutLocal.any { it.messageId == sent.messageId }) s.copy(messages = withoutLocal)
-                        else s.copy(messages = s.messages.map { if (it.messageId == localId) sent else it })
-                    }
-                    patchChat(chatId) { it.copy(lastMessage = LastMessage(sent.messageId, sent.text, sent.sentAt, "outgoing", sent.status)) }
-                }
-                .onFailure {
-                    updateThread(chatId) { s ->
-                        s.copy(messages = s.messages.map { m -> if (m.messageId == localId) m.copy(status = "failed") else m })
+                        s.copy(messages = s.messages.map { m ->
+                            if (m.messageId == localId) m.copy(status = "failed", text = "$UPLOADING$label — ${e.message ?: "failed"}") else m
+                        })
                     }
                 }
         }
     }
 
-    fun retry(chatId: String, message: Message) {
-        updateThread(chatId) { s -> s.copy(messages = s.messages.filter { it.messageId != message.messageId }) }
-        send(chatId, message.text)
+    private fun replaceLocal(chatId: String, localId: String, sent: Message) {
+        updateThread(chatId) { s ->
+            val withoutLocal = s.messages.filter { it.messageId != localId }
+            if (withoutLocal.any { it.messageId == sent.messageId }) s.copy(messages = withoutLocal)
+            else s.copy(messages = s.messages.map { if (it.messageId == localId) sent else it })
+        }
+        patchChat(chatId) { it.copy(lastMessage = LastMessage(sent.messageId, sent.text, sent.sentAt, "outgoing", sent.status)) }
     }
 
+    private fun markFailed(chatId: String, localId: String) = updateThread(chatId) { s ->
+        s.copy(messages = s.messages.map { m -> if (m.messageId == localId) m.copy(status = "failed") else m })
+    }
+
+    fun retry(chatId: String, message: Message) {
+        if (message.text.startsWith(UPLOADING)) {
+            updateThread(chatId) { s -> s.copy(messages = s.messages.filter { it.messageId != message.messageId }) }
+            return
+        }
+        updateThread(chatId) { s -> s.copy(messages = s.messages.filter { it.messageId != message.messageId }) }
+        sendBody(chatId, message.text, message.viewOnce)
+    }
+
+    fun discardFailed(chatId: String, message: Message) =
+        updateThread(chatId) { s -> s.copy(messages = s.messages.filter { it.messageId != message.messageId }) }
+
     fun setTyping(chatId: String, typing: Boolean) = realtime.typing(chatId, typing)
+
+    // ── Message actions ─────────────────────────────────────────────────────
+
+    suspend fun edit(chatId: String, message: Message, newText: String) {
+        val content = message.content as? MessageContent.Text
+        // Keep the reply quote when editing a reply
+        val body = if (content?.quote != null) "> ${content.quote}\n${newText.trim()}" else newText.trim()
+        api.editMessage(message.messageId, body)
+        updateThread(chatId) { s -> s.copy(messages = s.messages.map { if (it.messageId == message.messageId) it.copy(text = body, edited = true) else it }) }
+    }
+
+    suspend fun delete(chatId: String, messageId: String) {
+        api.deleteMessage(messageId)
+        markDeleted(chatId, messageId)
+    }
+
+    fun react(chatId: String, messageId: String, emoji: String) = scope.launch {
+        val me = currentUser ?: return@launch
+        val mine = _reactions.value[chatId]?.get(messageId)?.firstOrNull { it.userId == me.userId }
+        applyReaction(chatId, messageId, me.userId, me.displayName, if (mine?.emoji == emoji) null else emoji)
+        runCatching { api.react(messageId, emoji) }.onFailure {
+            applyReaction(chatId, messageId, me.userId, me.displayName, mine?.emoji)
+        }
+    }
+
+    private fun applyReaction(chatId: String, messageId: String, userId: Long, name: String, emoji: String?) {
+        _reactions.update { all ->
+            val chatMap = all[chatId].orEmpty()
+            val list = chatMap[messageId].orEmpty().filter { it.userId != userId } +
+                listOfNotNull(emoji?.let { Reaction(userId, name, it) })
+            all + (chatId to (chatMap + (messageId to list)))
+        }
+    }
+
+    suspend fun forward(messageId: String, toChatId: String) {
+        api.forward(messageId, toChatId)
+    }
+
+    suspend fun star(messageId: String) = api.star(messageId)
+    suspend fun unstar(messageId: String) = api.unstar(messageId)
+
+    suspend fun pin(chatId: String, message: Message?) {
+        api.pin(chatId, message?.messageId)
+        _pinned.update { it + (chatId to message?.let { m -> PinnedMessage(m.messageId, m.text, m.senderDisplayName) }) }
+    }
+
+    suspend fun openViewOnce(chatId: String, messageId: String) {
+        runCatching { api.openViewOnce(messageId) }
+    }
+
+    /** After a view-once message has been shown, the local copy is burned too. */
+    fun burnViewOnce(chatId: String, messageId: String) = updateThread(chatId) { s ->
+        s.copy(messages = s.messages.map { if (it.messageId == messageId) it.copy(viewOnceOpened = true, text = "") else it })
+    }
+
+    fun vote(chatId: String, messageId: String, option: Int) = scope.launch {
+        runCatching { api.vote(messageId, option) }.onSuccess { votes -> applyPoll(chatId, messageId, votes, option) }
+    }
+
+    private fun applyPoll(chatId: String, messageId: String, votes: Map<String, Int>, myVote: Int?) = updateThread(chatId) { s ->
+        s.copy(messages = s.messages.map { m ->
+            if (m.messageId == messageId && m.poll != null) m.copy(poll = m.poll.copy(votes = votes, myVote = myVote ?: m.poll.myVote)) else m
+        })
+    }
+
+    suspend fun createPoll(chatId: String, question: String, options: List<String>) {
+        api.createPoll(chatId, question, options)
+        openChat(chatId)
+    }
+
+    suspend fun schedule(chatId: String, text: String, at: Instant) = api.schedule(chatId, text, at.toString())
+
+    suspend fun linkPreview(url: String): LinkPreview? {
+        if (linkPreviews.containsKey(url)) return linkPreviews[url]
+        return api.linkPreview(url).also { linkPreviews[url] = it }
+    }
+
+    private fun markDeleted(chatId: String, messageId: String) = updateThread(chatId) { s ->
+        s.copy(messages = s.messages.map { if (it.messageId == messageId) it.copy(deleted = true, text = "") else it })
+    }
 
     private fun updateThread(chatId: String, transform: (ThreadState) -> ThreadState) {
         _threads.update { map -> map + (chatId to transform(map[chatId] ?: ThreadState())) }
@@ -249,8 +428,8 @@ class ChatRepository(
         if (current.isEmpty()) return latest
         val latestIds = latest.mapTo(HashSet()) { it.messageId }
         val oldestLatest = latest.firstOrNull()?.sentAt.orEmpty()
-        val older = current.filter { it.messageId !in latestIds && !it.messageId.startsWith("local-") && it.sentAt < oldestLatest }
-        val pending = current.filter { it.messageId.startsWith("local-") }
+        val older = current.filter { it.messageId !in latestIds && !it.isLocal && it.sentAt < oldestLatest }
+        val pending = current.filter { it.isLocal }
         return older + latest + pending
     }
 
@@ -274,12 +453,9 @@ class ChatRepository(
                 if (chatId == null) return
                 if (obj.str("reload") == "true") { refreshChats(); return }
                 val last = obj["lastMessage"]?.let { runCatching { api.json.decodeFromJsonElement<LastMessage>(it) }.getOrNull() }
-                val unread = (obj["unreadCount"] as? kotlinx.serialization.json.JsonPrimitive)?.intOrNull
+                val unread = obj.int("unreadCount")
                 val found = patchChat(chatId) { c ->
-                    c.copy(
-                        lastMessage = last ?: c.lastMessage,
-                        unreadCount = if (chatId == activeChatId) 0 else unread ?: c.unreadCount,
-                    )
+                    c.copy(lastMessage = last ?: c.lastMessage, unreadCount = if (chatId == activeChatId) 0 else unread ?: c.unreadCount)
                 }
                 if (!found) refreshChats()
             }
@@ -287,14 +463,15 @@ class ChatRepository(
                 val messageId = obj.str("messageId") ?: return
                 val status = obj.str("status") ?: if (event.name == "message:read") "read" else "delivered"
                 if (chatId != null) updateThread(chatId) { s ->
-                    s.copy(messages = s.messages.map { if (it.messageId == messageId) it.copy(status = status) else it })
+                    s.copy(messages = s.messages.map { if (it.messageId == messageId && rank(status) > rank(it.status)) it.copy(status = status) else it })
+                }
+                if (chatId != null) patchChat(chatId) { c ->
+                    if (c.lastMessage?.messageId == messageId) c.copy(lastMessage = c.lastMessage.copy(status = status)) else c
                 }
             }
             "message:deleted" -> {
                 val messageId = obj.str("messageId") ?: return
-                if (chatId != null) updateThread(chatId) { s ->
-                    s.copy(messages = s.messages.map { if (it.messageId == messageId) it.copy(deleted = true, text = "") else it })
-                }
+                if (chatId != null) markDeleted(chatId, messageId)
             }
             "message:edited" -> {
                 val messageId = obj.str("messageId") ?: return
@@ -303,16 +480,35 @@ class ChatRepository(
                     s.copy(messages = s.messages.map { if (it.messageId == messageId) it.copy(text = text, edited = true) else it })
                 }
             }
+            "message:reaction" -> {
+                val messageId = obj.str("messageId") ?: return
+                val userId = obj["userId"].asLong() ?: return
+                if (chatId != null) applyReaction(chatId, messageId, userId, obj.str("displayName").orEmpty(), obj.str("emoji"))
+            }
+            "chat:pinned" -> if (chatId != null) {
+                val messageId = obj.str("messageId")
+                val msg = messageId?.let { id -> _threads.value[chatId]?.messages?.firstOrNull { it.messageId == id } }
+                _pinned.update { it + (chatId to messageId?.let { PinnedMessage(it, msg?.text, msg?.senderDisplayName) }) }
+                if (messageId != null && msg == null) scope.launch { runCatching { api.pinned(chatId) }.onSuccess { p -> _pinned.update { it + (chatId to p) } } }
+            }
+            "poll:voted" -> {
+                val messageId = obj.str("messageId") ?: return
+                val votes = (obj["votes"] as? JsonObject)?.mapValues { (it.value as? JsonPrimitive)?.content?.toIntOrNull() ?: 0 } ?: return
+                if (chatId != null) applyPoll(chatId, messageId, votes, null)
+            }
             "chat:new" -> refreshChats()
-            "chat:removed" -> if (chatId != null) {
-                _chatList.update { s -> s.copy(chats = s.chats.filter { it.chatId != chatId }) }
-            }
-            "typing:start" -> if (chatId != null) {
-                _typing.update { it + (chatId to (obj.str("displayName") ?: "typing")) }
-            }
+            "chat:removed" -> if (chatId != null) _chatList.update { s -> s.copy(chats = s.chats.filter { it.chatId != chatId }) }
+            "typing:start" -> if (chatId != null) _typing.update { it + (chatId to (obj.str("displayName") ?: "typing")) }
             "typing:stop" -> if (chatId != null) _typing.update { it - chatId }
+            "presence:online" -> obj["userId"].asLong()?.let { id -> _online.update { it + id } }
+            "presence:offline" -> obj["userId"].asLong()?.let { id ->
+                _online.update { it - id }
+                _lastSeen.update { it + (id to obj.str("lastSeenAt")) }
+            }
         }
     }
+
+    private fun rank(status: String) = when (status) { "read" -> 3; "delivered" -> 2; "sent" -> 1; else -> 0 }
 
     private fun onIncomingMessage(chatId: String, message: Message) {
         _typing.update { it - chatId }
@@ -321,9 +517,7 @@ class ChatRepository(
                 if (s.messages.any { it.messageId == message.messageId }) s
                 else {
                     // Our own message echoed back before the HTTP response: drop the matching pending copy
-                    val pendingTwin = if (message.isOutgoing) s.messages.firstOrNull {
-                        it.messageId.startsWith("local-") && it.text == message.text
-                    } else null
+                    val pendingTwin = if (message.isOutgoing) s.messages.firstOrNull { it.isLocal && it.text == message.text } else null
                     s.copy(messages = s.messages.filter { it !== pendingTwin } + message)
                 }
             }
@@ -331,12 +525,15 @@ class ChatRepository(
         val isActive = chatId == activeChatId && inForeground
         val found = patchChat(chatId) { c ->
             c.copy(
-                lastMessage = LastMessage(message.messageId, message.text, message.sentAt, message.direction, message.status),
+                lastMessage = LastMessage(message.messageId, if (message.viewOnce) "" else message.text, message.sentAt, message.direction, message.status),
                 unreadCount = if (isActive || message.isOutgoing) 0 else c.unreadCount + 1,
             )
         }
         if (!found) refreshChats()
-        if (isActive && !message.isOutgoing) markReadSoon(chatId)
+        if (!message.isOutgoing) {
+            if (isActive) markReadSoon(chatId) else scope.launch { api.markDelivered(chatId, message.messageId) }
+            _incoming.tryEmit(IncomingEvent(chatId, message, isActive))
+        }
     }
 
     /** Coalesces bursts of incoming messages into one read receipt call (the server allows 30/min). */
@@ -349,5 +546,8 @@ class ChatRepository(
         }
     }
 
-    private fun JsonObject.str(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
+    companion object {
+        /** Local-only body prefix for a media message that is still uploading. */
+        const val UPLOADING = "__UPLOADING__:"
+    }
 }

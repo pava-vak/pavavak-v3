@@ -47,6 +47,11 @@ class SecureStore(context: Context) {
         get() = prefs.getString(KEY_USER, null)?.let { runCatching { json.decodeFromString<User>(it) }.getOrNull() }
         set(value) = prefs.edit().putString(KEY_USER, value?.let { json.encodeToString(it) }).apply()
 
+    /** App-lock PIN as "salt:hash" (PBKDF2); never the PIN itself. */
+    var pinRecord: String?
+        get() = prefs.getString(KEY_PIN, null)
+        set(value) = prefs.edit().putString(KEY_PIN, value).apply()
+
     fun clearSession() {
         prefs.edit().remove(KEY_ACCESS).remove(KEY_SESSION).remove(KEY_COOKIES).remove(KEY_USER).apply()
     }
@@ -57,5 +62,6 @@ class SecureStore(context: Context) {
         const val KEY_SESSION = "session_id"
         const val KEY_COOKIES = "cookies"
         const val KEY_USER = "user"
+        const val KEY_PIN = "app_lock_pin"
     }
 }

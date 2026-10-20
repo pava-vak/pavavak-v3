@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- captures: camera output before upload (deleted after). media: downloaded files opened in another app -->
+<paths>
+    <cache-path name="captures" path="captures/" />
+    <cache-path name="media" path="media/" />
+</paths>
