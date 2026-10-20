@@ -601,16 +601,23 @@ function registerFeatureRoutes(app) {
         'insert into v3_polls(message_id,question,options) values($1,$2,$3)',
         [messageId, question, JSON.stringify(options)]
       );
-      await client.query('commit');
       const memberIds = await getMemberIds(db, chatId);
+      // Receipts make the poll visible in each member's thread (queries are receipt-based)
+      for (const memberId of memberIds) {
+        await client.query(
+          'insert into v3_message_receipts(message_id,user_id) values($1,$2) on conflict do nothing',
+          [messageId, memberId]
+        );
+      }
+      await client.query('commit');
       for (const memberId of memberIds) {
         const dir = memberId === request.auth.userId ? 'outgoing' : 'incoming';
         await db.query(
           `insert into v3_user_chat_summaries(user_id,conversation_id,last_message_id,last_message_preview,last_message_at,last_message_direction,last_message_status,unread_count,updated_at)
-           values($1,$2,$3,$4,$5,$6,$7,
-             case when $1=$8 then 0 else coalesce((select unread_count from v3_user_chat_summaries where user_id=$1 and conversation_id=$2),0)+1 end,now())
+           values($1::bigint,$2,$3,$4,$5,$6,$7,
+             case when $1::bigint=$8::bigint then 0 else coalesce((select unread_count from v3_user_chat_summaries where user_id=$1::bigint and conversation_id=$2),0)+1 end,now())
            on conflict(user_id,conversation_id) do update set last_message_id=$3,last_message_preview=$4,last_message_at=$5,last_message_direction=$6,last_message_status=$7,
-           unread_count=case when $1=$8 then 0 else v3_user_chat_summaries.unread_count+1 end,updated_at=now()`,
+           unread_count=case when $1::bigint=$8::bigint then 0 else v3_user_chat_summaries.unread_count+1 end,updated_at=now()`,
           [memberId, chatId, messageId, `📊 Poll: ${question}`, now, dir, 'sent', request.auth.userId]
         );
         realtime.emitToUser(memberId, 'message:new', {
@@ -669,11 +676,12 @@ function registerFeatureRoutes(app) {
       await getMessageConversation(db, request.params.messageId, request.auth.userId);
       const { rows } = await db.query(
         `select p.question, p.options,
-                json_object_agg(coalesce(v.option_index::text,'_'), count(v.user_id)) filter (where v.option_index is not null) as votes,
+                (select json_object_agg(t.option_index::text, t.cnt)
+                   from (select option_index, count(*) as cnt from v3_poll_votes
+                         where message_id=p.message_id group by option_index) t) as votes,
                 (select option_index from v3_poll_votes where message_id=p.message_id and user_id=$2 limit 1) as my_vote
          from v3_polls p
-         left join v3_poll_votes v on v.message_id=p.message_id
-         where p.message_id=$1 group by p.message_id,p.question,p.options`,
+         where p.message_id=$1`,
         [request.params.messageId, request.auth.userId]
       );
       if (!rows.length) return reply.status(404).send({ success: false, error: 'Poll not found' });

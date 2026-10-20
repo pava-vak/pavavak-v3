@@ -112,7 +112,9 @@ function registerMessageRoutes(app) {
       const memberIds = await chatAdapter.getConversationMemberUserIds(parsed.data.chatId);
       const targets = memberIds.length > 0 ? memberIds : [request.auth.userId];
 
-      realtime.emitMessageNewToMembers(request.auth, parsed.data.chatId, message, targets);
+      // The sender's copy of a view-once message is blank; recipients still need the content to open it
+      realtime.emitMessageNewToMembers(request.auth, parsed.data.chatId, message, targets,
+        parsed.data.viewOnce ? parsed.data.text : null);
 
       const lastMessage = {
         messageId: message.messageId,

@@ -45,8 +45,14 @@ async function runOnce() {
         [row.conversation_id]
       );
       const memberIds = memberRows.map(r => Number(r.user_id));
+      const senderId = Number(row.sender_id);
       for (const memberId of memberIds) {
-        const isSender = memberId === row.sender_id;
+        const isSender = memberId === senderId;
+        // Every member needs a receipt row: thread queries only return messages the reader received
+        await client.query(
+          `insert into v3_message_receipts(message_id, user_id) values($1, $2) on conflict do nothing`,
+          [messageId, memberId]
+        );
         await client.query(
           `insert into v3_user_chat_summaries(user_id, conversation_id, unread_count, last_message_id,
              last_message_preview, last_message_at, last_message_direction, last_message_status, updated_at)
@@ -64,7 +70,7 @@ async function runOnce() {
         );
       }
       await client.query('commit');
-      const auth = { userId: row.sender_id, displayName: row.display_name, username: row.username };
+      const auth = { userId: Number(row.sender_id), displayName: row.display_name, username: row.username };
       const message = {
         messageId,
         chatId: row.conversation_id,

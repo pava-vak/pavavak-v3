@@ -82,7 +82,9 @@ function isVideo(mimeType) {
 }
 
 function registerMediaRoutes(app) {
-  // Binary parsers for video, audio, and documents
+  // Binary parsers for video, audio, and documents. Fastify's built-in text/plain parser would
+  // otherwise turn .txt/.csv uploads into a string, which upload-binary rejects.
+  if (app.hasContentTypeParser('text/plain')) app.removeContentTypeParser('text/plain');
   for (const prefix of [/^video\//, /^audio\//, /^application\//, /^text\//]) {
     app.addContentTypeParser(prefix, { parseAs: 'buffer' }, (_req, body, done) => done(null, body));
   }

@@ -4,15 +4,14 @@ const { createSeedState } = require('../shared/chatSeed');
 const identity = require('./identityAdapter');
 const { env } = require('../config/env');
 
+// Creates the row if missing. Never updates it: the values come from the access token, which can be
+// stale (e.g. right after a rename), and the identity repository owns these columns.
 async function ensureUser(user) {
   const db = getPool();
   await db.query(
     `insert into v3_users (user_id, username, display_name, is_admin)
      values ($1, $2, $3, $4)
-     on conflict (user_id) do update
-     set username = excluded.username,
-         display_name = excluded.display_name,
-         is_admin = excluded.is_admin`,
+     on conflict (user_id) do nothing`,
     [user.userId, user.username, user.displayName, Boolean(user.isAdmin)]
   );
 }
@@ -143,6 +142,8 @@ function mapSummaryRow(row) {
     avatarText: row.avatar_text || '?',
     unreadCount: row.unread_count,
     muted: row.muted,
+    archived: Boolean(row.archived),
+    background: row.chat_background || null,
     peerId: row.peer_user_id || null,
     lastMessage: row.last_message_id
       ? {
@@ -176,6 +177,8 @@ async function listChatsForUser(user) {
       end, 1) as avatar_text,
       s.unread_count,
       m.muted,
+      m.archived,
+      m.chat_background,
       s.last_message_id,
       s.last_message_preview,
       s.last_message_at,
@@ -241,6 +244,8 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
          msg.view_once,
          msg.expires_at,
          msg.deleted_at,
+         msg.edited_at,
+         msg.forwarded_from_id,
          r.view_once_opened_at,
          case
            when msg.deleted_at is not null then ''
@@ -301,6 +306,9 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
     viewOnceOpened: Boolean(row.view_once_opened_at),
     expiresAt: row.expires_at?.toISOString?.() || row.expires_at || null,
     deleted: Boolean(row.deleted_at),
+    edited: Boolean(row.edited_at),
+    editedAt: row.edited_at?.toISOString?.() || row.edited_at || null,
+    forwarded: Boolean(row.forwarded_from_id),
     poll: row.poll_question ? {
       question: row.poll_question,
       options: Array.isArray(row.poll_options) ? row.poll_options : JSON.parse(row.poll_options || '[]'),
@@ -704,6 +712,9 @@ async function adminListMessagesForChat(chatId, cursor = null, limit = 50) {
          coalesce(u.display_name, u.username, msg.sender_id::text) as sender_display_name,
          msg.body as text,
          msg.deleted_at,
+         msg.view_once,
+         msg.expires_at,
+         msg.edited_at,
          msg.created_at as sent_at
        from v3_messages msg
        left join v3_users u on u.user_id = msg.sender_id
@@ -717,7 +728,8 @@ async function adminListMessagesForChat(chatId, cursor = null, limit = 50) {
 
   const rows = result.rows;
   const hasMore = rows.length > safeLimit;
-  const visibleRows = hasMore ? rows.slice(0, safeLimit) : rows;
+  // Rows are oldest-first here, so the extra probe row is the first one, not the last
+  const visibleRows = hasMore ? rows.slice(1) : rows;
   const items = visibleRows.map((row) => ({
     messageId: row.message_id,
     senderId: Number(row.sender_id),
@@ -726,7 +738,10 @@ async function adminListMessagesForChat(chatId, cursor = null, limit = 50) {
     text: row.text,
     sentAt: row.sent_at?.toISOString?.() || row.sent_at,
     status: 'sent',
-    deletedAt: row.deleted_at?.toISOString?.() || row.deleted_at || null
+    deletedAt: row.deleted_at?.toISOString?.() || row.deleted_at || null,
+    viewOnce: Boolean(row.view_once),
+    expiresAt: row.expires_at?.toISOString?.() || row.expires_at || null,
+    edited: Boolean(row.edited_at)
   }));
 
   return {

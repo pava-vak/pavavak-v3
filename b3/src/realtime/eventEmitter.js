@@ -26,23 +26,24 @@ function emitToChat(chatId, event, payload, exceptSocketId = null) {
   io.to(room).emit(event, payload);
 }
 
-function messageForMember(sender, message, memberId) {
-  if (memberId === sender.userId) {
+function messageForMember(sender, message, memberId, recipientText) {
+  if (Number(memberId) === Number(sender.userId)) {
     return message;
   }
   return {
     ...message,
+    ...(recipientText != null ? { text: recipientText } : {}),
     direction: 'incoming',
     senderDisplayName: sender.displayName,
     status: 'sent'
   };
 }
 
-function emitMessageNewToMembers(sender, chatId, message, memberIds) {
+function emitMessageNewToMembers(sender, chatId, message, memberIds, recipientText = null) {
   for (const memberId of memberIds) {
     emitToUser(memberId, 'message:new', {
       chatId,
-      message: messageForMember(sender, message, memberId)
+      message: messageForMember(sender, message, memberId, recipientText)
     });
   }
 }
