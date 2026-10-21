@@ -84,6 +84,30 @@ class ChatRepository(
 
     val currentUser: User? get() = (_session.value as? SessionState.SignedIn)?.user
 
+    /** Runs before sign-out while the session is still valid (the app unregisters its push token here). */
+    var beforeLogout: (suspend () -> Unit)? = null
+
+    data class CachedChat(val title: String, val muted: Boolean)
+
+    /** Title and mute state from the live list, or from the encrypted cache when the app was closed. */
+    fun cachedChat(chatId: String): CachedChat? {
+        chat(chatId)?.let { return CachedChat(it.displayTitle, it.muted) }
+        val raw = store.chatCache ?: return null
+        return runCatching {
+            val obj = api.json.parseToJsonElement(raw).jsonObject[chatId]?.jsonObject ?: return null
+            CachedChat(obj.str("t") ?: "Chat", obj.str("m") == "true")
+        }.getOrNull()
+    }
+
+    private fun saveChatCache(chats: List<ChatSummary>) {
+        store.chatCache = kotlinx.serialization.json.buildJsonObject {
+            for (c in chats) put(c.chatId, kotlinx.serialization.json.buildJsonObject {
+                put("t", kotlinx.serialization.json.JsonPrimitive(c.displayTitle))
+                put("m", kotlinx.serialization.json.JsonPrimitive(c.muted))
+            })
+        }.toString()
+    }
+
     init {
         api.onSessionExpired = { scope.launch { onSignedOut() } }
         scope.launch { realtime.events.collect { handleEvent(it) } }
@@ -126,6 +150,7 @@ class ChatRepository(
 
     fun logout() {
         scope.launch {
+            runCatching { beforeLogout?.invoke() }
             realtime.disconnect()
             api.logout()
             onSignedOut()
@@ -160,7 +185,7 @@ class ChatRepository(
         _chatList.update { it.copy(loading = true, error = null) }
         scope.launch {
             runCatching { api.chats() }
-                .onSuccess { chats -> _chatList.value = ChatListState(sortChats(chats)) }
+                .onSuccess { chats -> _chatList.value = ChatListState(sortChats(chats)); saveChatCache(chats) }
                 .onFailure { e -> _chatList.update { it.copy(loading = false, error = e.message) } }
         }
     }

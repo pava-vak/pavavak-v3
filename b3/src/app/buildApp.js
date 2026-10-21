@@ -13,7 +13,7 @@ const { registerReceiptRoutes } = require('../modules/receipts/receipt.routes');
 const { registerPrivacyRoutes } = require('../modules/privacy/privacy');
 const { registerUserRoutes } = require('../modules/users/user.routes');
 const { registerAdminRoutes } = require('../modules/admin/admin.routes');
-const { registerPushRoutes } = require('../modules/notifications/push.routes');
+const { registerPushRoutes, registerFcmRoutes } = require('../modules/notifications/push.routes');
 const { registerMediaRoutes } = require('../modules/media/media.routes');
 const { registerFeatureRoutes } = require('../modules/features/features.routes');
 const { registerBiometricRoutes } = require('../modules/biometric/biometric.routes');
@@ -73,6 +73,7 @@ function buildApp() {
     registerUserRoutes(instance);
     registerAdminRoutes(instance);
     registerPushRoutes(instance);
+    registerFcmRoutes(instance);
     registerMediaRoutes(instance);
     registerFeatureRoutes(instance);
     registerBiometricRoutes(instance);

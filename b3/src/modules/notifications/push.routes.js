@@ -2,6 +2,9 @@ const { z } = require('zod');
 const { requireAuth } = require('../../shared/security/auth.preHandler');
 const { env } = require('../../config/env');
 const { addSubscription, removeSubscription } = require('./pushStore');
+const fcm = require('./fcm.service');
+
+const fcmTokenSchema = z.object({ token: z.string().min(20).max(4096) });
 
 const subscribeSchema = z.object({
   endpoint: z.string().url(),
@@ -43,4 +46,27 @@ function registerPushRoutes(app) {
   });
 }
 
-module.exports = { registerPushRoutes };
+function registerFcmRoutes(app) {
+  // Android app registers its Firebase token after sign-in and whenever it rotates
+  app.post('/api/v3/push/fcm-token', {
+    preHandler: requireAuth,
+    config: { rateLimit: { max: 20, timeWindow: '1 minute' } }
+  }, async (request, reply) => {
+    const parsed = fcmTokenSchema.safeParse(request.body || {});
+    if (!parsed.success) return reply.status(400).send({ success: false, error: 'Invalid token' });
+    await fcm.saveToken(request.auth.userId, parsed.data.token);
+    return { success: true, enabled: fcm.isConfigured() };
+  });
+
+  app.delete('/api/v3/push/fcm-token', {
+    preHandler: requireAuth,
+    config: { rateLimit: { max: 20, timeWindow: '1 minute' } }
+  }, async (request, reply) => {
+    const parsed = fcmTokenSchema.safeParse(request.body || {});
+    if (!parsed.success) return reply.status(400).send({ success: false, error: 'Invalid token' });
+    await fcm.removeToken(request.auth.userId, parsed.data.token);
+    return { success: true };
+  });
+}
+
+module.exports = { registerPushRoutes, registerFcmRoutes };

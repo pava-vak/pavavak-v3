@@ -125,6 +125,9 @@ class ApiClient(private val store: SecureStore) {
     suspend fun revokeSession(id: String) = execute("DELETE", "/api/v3/auth/sessions/${enc(id)}")
     suspend fun revokeAllSessions() = execute("DELETE", "/api/v3/auth/sessions")
 
+    suspend fun registerFcmToken(token: String) = execute("POST", "/api/v3/push/fcm-token", obj("token" to token).toString())
+    suspend fun unregisterFcmToken(token: String) = execute("DELETE", "/api/v3/push/fcm-token", obj("token" to token).toString())
+
     suspend fun ghostMode(): Boolean =
         (api(execute("GET", "/api/v3/me/privacy"))["ghostMode"] as? JsonPrimitive)?.content == "true"
     suspend fun setGhostMode(on: Boolean) = execute("PUT", "/api/v3/me/privacy", obj("ghostMode" to on).toString())

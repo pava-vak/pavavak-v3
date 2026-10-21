@@ -10,3 +10,6 @@ captures/
 *.jks
 *.apk
 build-log.txt
+
+# Firebase config (per project, kept out of git)
+google-services.json

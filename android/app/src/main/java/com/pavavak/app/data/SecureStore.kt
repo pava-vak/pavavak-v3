@@ -75,6 +75,11 @@ class SecureStore(context: Context) {
         get() = prefs.getLong(KEY_FAILED_AT, 0L)
         set(value) = prefs.edit().putLong(KEY_FAILED_AT, value).apply()
 
+    /** Chat titles and mute state, so a push that arrives while the app is closed can be labelled without a network call. */
+    var chatCache: String?
+        get() = prefs.getString(KEY_CHAT_CACHE, null)
+        set(value) = prefs.edit().putString(KEY_CHAT_CACHE, value).apply()
+
     /** Everything tied to the signed-in person's privacy setup on this phone. */
     fun clearPrivacy() {
         prefs.edit().remove(KEY_PIN).remove(KEY_DECOY_PIN).remove(KEY_HIDDEN).remove(KEY_LOCKED)
@@ -82,7 +87,7 @@ class SecureStore(context: Context) {
     }
 
     fun clearSession() {
-        prefs.edit().remove(KEY_ACCESS).remove(KEY_SESSION).remove(KEY_COOKIES).remove(KEY_USER).apply()
+        prefs.edit().remove(KEY_ACCESS).remove(KEY_SESSION).remove(KEY_COOKIES).remove(KEY_USER).remove(KEY_CHAT_CACHE).apply()
     }
 
     private companion object {
@@ -93,6 +98,7 @@ class SecureStore(context: Context) {
         const val KEY_USER = "user"
         const val KEY_PIN = "app_lock_pin"
         const val KEY_DECOY_PIN = "decoy_pin"
+        const val KEY_CHAT_CACHE = "chat_cache"
         const val KEY_HIDDEN = "hidden_chats"
         const val KEY_LOCKED = "locked_chats"
         const val KEY_FAILED = "failed_unlocks"

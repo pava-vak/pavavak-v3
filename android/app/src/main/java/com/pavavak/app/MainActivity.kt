@@ -89,6 +89,7 @@ class MainActivity : FragmentActivity() {
             window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         }
         val app = application as PavaApplication
+        takeChatFromIntent(intent)
         applyBars(paletteFor(app.settings.current.themeId))
         setContent {
             val settings by app.settings.values.collectAsStateWithLifecycle()
@@ -96,6 +97,18 @@ class MainActivity : FragmentActivity() {
             LaunchedEffect(palette.id) { applyBars(palette) }
             PavaTheme(palette) { PavaRoot(app.repository, app.settings, app.lock) }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        takeChatFromIntent(intent)
+    }
+
+    /** A notification tap carries the chat to open; it waits until the app is unlocked. */
+    private fun takeChatFromIntent(intent: android.content.Intent?) {
+        val chatId = intent?.getStringExtra(com.pavavak.app.push.Notifier.EXTRA_CHAT_ID) ?: return
+        intent.removeExtra(com.pavavak.app.push.Notifier.EXTRA_CHAT_ID)
+        (application as PavaApplication).pendingChat.value = chatId
     }
 
     override fun onResume() {
@@ -183,6 +196,30 @@ private fun SignedInApp(repository: ChatRepository, settingsStore: SettingsStore
         }
     }
     LaunchedEffect(banner) { if (banner != null) { delay(3500); banner = null } }
+
+    // Open the chat from a tapped notification once the app is unlocked
+    val app = context.applicationContext as PavaApplication
+    val pendingChat by app.pendingChat.collectAsStateWithLifecycle()
+    val lockedNow by lock.locked.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingChat, lockedNow) {
+        val id = pendingChat ?: return@LaunchedEffect
+        if (lockedNow) return@LaunchedEffect
+        app.pendingChat.value = null
+        if (id in lock.hiddenChats.value) return@LaunchedEffect
+        nav.navigate(Routes.chat(id)) { launchSingleTop = true }
+    }
+
+    // Ask once for notification permission (Android 13+) so closed-app alerts can show
+    val notifPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences("pava_settings", android.content.Context.MODE_PRIVATE)
+        if (android.os.Build.VERSION.SDK_INT >= 33 && app.push.isAvailable() && !com.pavavak.app.push.Notifier.canNotify(context)
+            && !prefs.getBoolean("asked_notifications", false)) {
+            prefs.edit().putBoolean("asked_notifications", true).apply()
+            notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     val activity = context as? android.app.Activity
     val shake by settingsStore.values.collectAsStateWithLifecycle()

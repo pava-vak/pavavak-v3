@@ -14,6 +14,7 @@ import com.pavavak.app.data.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class PavaApplication : Application() {
     lateinit var repository: ChatRepository
@@ -22,6 +23,15 @@ class PavaApplication : Application() {
         private set
     lateinit var lock: AppLock
         private set
+    lateinit var push: com.pavavak.app.push.PushManager
+        private set
+
+    /** True while any screen of the app is visible; push notifications are skipped then. */
+    @Volatile var isInForeground = false
+        private set
+
+    /** Chat to open after a notification tap (consumed by the UI once unlocked). */
+    val pendingChat = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
     override fun onCreate() {
         super.onCreate()
@@ -33,15 +43,25 @@ class PavaApplication : Application() {
         val realtime = RealtimeClient(api, store, scope)
         val media = MediaRepository(this, api)
         repository = ChatRepository(api, store, realtime, media, lock, scope)
+        push = com.pavavak.app.push.PushManager(this, api)
+        repository.beforeLogout = { push.unregister(); com.pavavak.app.push.Notifier.cancelAll(this) }
+        // Register for push on every sign-in (and on launch when already signed in)
+        scope.launch {
+            repository.session.collect { s -> if (s is com.pavavak.app.data.SessionState.SignedIn) push.register() }
+        }
         // Nothing decrypted stays on disk while the app is locked
         lock.onLocked = { if (settings.current.wipeMediaOnLock) media.clear() }
         repository.restoreSession()
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
+                isInForeground = true
                 lock.onForeground()
+                // Retry push registration: Play services may not have been ready at the last attempt
+                if (repository.currentUser != null) scope.launch { push.register() }
                 repository.onAppForeground()
             }
             override fun onStop(owner: LifecycleOwner) {
+                isInForeground = false
                 lock.onBackground()
                 repository.onAppBackground()
             }

@@ -3,6 +3,7 @@ const { requireAuth } = require('../../shared/security/auth.preHandler');
 const chatAdapter = require('../../db/chatAdapter');
 const realtime = require('../../realtime/eventEmitter');
 const { sendPushToUser } = require('../notifications/push.service');
+const { sendFcmToUser } = require('../notifications/fcm.service');
 const { getPool } = require('../../db/pool');
 const { canAccessFile, fileIdFromBody } = require('../media/mediaAccess');
 const { BURN_SECONDS } = require('../privacy/privacy');
@@ -141,7 +142,8 @@ function registerMessageRoutes(app) {
           'select user_id from v3_conversation_members where conversation_id=$1 and muted=true',
           [parsed.data.chatId]
         );
-        mutedUserIds = new Set(mutedRows.map(r => r.user_id));
+        // bigint arrives as a string; member ids are numbers
+        mutedUserIds = new Set(mutedRows.map(r => Number(r.user_id)));
       } catch { /* non-fatal — proceed without mute check */ }
 
       for (const memberId of targets) {
@@ -159,7 +161,9 @@ function registerMessageRoutes(app) {
         });
 
         // Send Web Push only to recipients who are not the sender and have not muted the chat
-        if (!isSender && !mutedUserIds.has(memberId) && !parsed.data.silent) {
+        if (!isSender && !mutedUserIds.has(Number(memberId)) && !parsed.data.silent) {
+          // Android: only the chat id travels through Google; the app fetches nothing until opened
+          sendFcmToUser(memberId, { type: 'message', chatId: parsed.data.chatId });
           sendPushToUser(memberId, {
             chatId: parsed.data.chatId,
             title: 'PaVa Vak',

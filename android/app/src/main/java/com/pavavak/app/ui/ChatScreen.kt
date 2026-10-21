@@ -130,6 +130,7 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
     var menuOpen by remember { mutableStateOf(false) }
 
     DisposableEffect(chatId) {
+        com.pavavak.app.push.Notifier.cancel(context, chatId)
         repository.openChat(chatId)
         onDispose { repository.closeChat(chatId); AudioPlayer.stop() }
     }

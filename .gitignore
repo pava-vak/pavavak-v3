@@ -21,3 +21,7 @@ app/src/**/google-services.json
 
 # User-uploaded media (private user data)
 b3/uploads/
+
+# Firebase service-account keys
+*firebase-adminsdk*.json
+*service-account*.json

@@ -7,6 +7,11 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Push notifications switch on only when the (git-ignored) Firebase config is present
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 // Release signing secrets live in the git-ignored local.properties
 val localProps = Properties().apply {
     rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
@@ -20,8 +25,8 @@ android {
         applicationId = "com.pavavak.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.2.0"
+        versionCode = 5
+        versionName = "1.3.0"
         buildConfigField("String", "API_BASE_URL", "\"https://187-127-190-15.sslip.io\"")
     }
 
@@ -92,5 +97,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.androidx.navigation.compose)
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
     debugImplementation(libs.androidx.ui.tooling)
 }
