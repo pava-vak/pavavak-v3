@@ -93,6 +93,7 @@ export function connectSocket() {
     'message:reaction',
     'chat:pinned',
     'poll:voted',
+    'message:expiry',
     'typing:start',
     'typing:stop',
     'presence:online',

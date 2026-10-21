@@ -37,17 +37,23 @@ function backButton() {
   return `<button class="thread-back" type="button" data-role="thread-back" aria-label="Back to chats">←</button>`;
 }
 
-function expiryLabel(expiresAt) {
-  if (!expiresAt) return '';
+function shortDuration(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
+// ⏱ disappearing, 🔥 burn after reading (counts down once read), 🔕 sent silently
+export function expiryLabel(expiresAt, item = null) {
+  const burning = item?.burnSeconds != null;
+  const silent = item?.silent && item?.direction === 'outgoing' ? ' 🔕' : '';
+  if (!expiresAt) return burning ? `🔥 ${shortDuration(item.burnSeconds)} after reading${silent}` : silent.trim();
   const ms = new Date(expiresAt) - Date.now();
   if (ms <= 0) return '';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `⏱ ${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `⏱ ${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `⏱ ${h}h`;
-  return `⏱ ${Math.floor(h / 24)}d`;
+  return `${burning ? '🔥' : '⏱'} ${shortDuration(Math.floor(ms / 1000))}${silent}`;
 }
 
 function voContentType(text) {
@@ -217,7 +223,7 @@ async function openViewOnceMediaOverlay(type, fileId) {
 function renderImageBubble(item) {
   const fileId = item.text.slice(8); // strip '__IMG__:'
   const isOutgoing = item.direction === 'outgoing';
-  const expiry = expiryLabel(item.expiresAt);
+  const expiry = expiryLabel(item.expiresAt, item);
   return `
     <article class="message-bubble ${isOutgoing ? 'message-outgoing' : 'message-incoming'}"
              data-message-id="${escapeHtml(item.messageId)}"
@@ -240,7 +246,7 @@ function renderImageBubble(item) {
 function renderVideoBubble(item) {
   const fileId = item.text.slice(8); // strip '__VID__:'
   const isOutgoing = item.direction === 'outgoing';
-  const expiry = expiryLabel(item.expiresAt);
+  const expiry = expiryLabel(item.expiresAt, item);
   return `
     <article class="message-bubble ${isOutgoing ? 'message-outgoing' : 'message-incoming'}"
              data-message-id="${escapeHtml(item.messageId)}"
@@ -392,7 +398,7 @@ function renderMessageBubble(item, showSender = false, reactions = null, isAdmin
   if (item.text?.startsWith('__POLL__:')) return renderPollBubble(item) + renderReactionsRow(item.messageId, reactions);
 
   const isOutgoing = item.direction === 'outgoing';
-  const expiry = expiryLabel(item.expiresAt);
+  const expiry = expiryLabel(item.expiresAt, item);
 
   // Parse reply-quoted prefix: "> Sender: preview\nactual text"
   let quoteBlock = '';
@@ -574,10 +580,12 @@ export function renderChatThreadView({ activeChat, threadState, composerValue = 
       </div>
       ${!readOnly && threadState.sendError ? `<p class="error-text send-error">${escapeHtml(threadState.sendError)}</p>` : ''}
       ${readOnly ? '' : `
-        ${(viewOnce || deleteAfter !== 'never') ? `
+        ${(viewOnce || deleteAfter !== 'never' || threadState.silent || (threadState.burn && threadState.burn !== 'off')) ? `
         <div class="composer-mode-bar">
           ${viewOnce ? '<span class="composer-mode-chip">👁 View Once</span>' : ''}
           ${deleteAfter !== 'never' ? `<span class="composer-mode-chip">⏱ ${deleteAfter}</span>` : ''}
+          ${threadState.burn && threadState.burn !== 'off' ? `<span class="composer-mode-chip">🔥 Burn ${escapeHtml(threadState.burn)} after reading</span>` : ''}
+          ${threadState.silent ? '<span class="composer-mode-chip">🔕 Silent</span>' : ''}
           <button type="button" class="composer-mode-clear" data-role="clear-composer-modes" aria-label="Clear modes" title="Clear modes">✕</button>
         </div>` : ''}
         <div class="reply-preview-bar hidden" data-role="reply-preview-bar">
@@ -612,6 +620,16 @@ export function renderChatThreadView({ activeChat, threadState, composerValue = 
                     <option value="7d"   ${deleteAfter === '7d'    ? 'selected' : ''}>7 days</option>
                   </select>
                 </label>
+                <label class="extras-timer-row">
+                  <span class="extras-timer-label">🔥 Burn after reading</span>
+                  <select class="privacy-timer extras-timer-select" data-role="burn-select">
+                    ${[['off', 'Off'], ['10s', '10 seconds'], ['1m', '1 minute'], ['5m', '5 minutes'], ['1h', '1 hour']]
+                      .map(([v, l]) => `<option value="${v}" ${(threadState.burn || 'off') === v ? 'selected' : ''}>${l}</option>`).join('')}
+                  </select>
+                </label>
+                <button type="button" class="img-source-btn${threadState.silent ? ' extras-btn--active' : ''}" data-role="toggle-silent">
+                  🔕 Send silently${threadState.silent ? ' ✓' : ''}
+                </button>
                 <button type="button" class="img-source-btn" data-role="schedule-message">🕐 Schedule</button>
                 <button type="button" class="img-source-btn" data-role="create-poll">📊 Poll</button>
               </div>
@@ -1056,7 +1074,7 @@ function openScheduleModal(text, onScheduleMessage) {
   });
 }
 
-export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRetry, onBack, onOpenViewOnce, onToggleViewOnce, onSetDeleteAfter, onScheduleMessage, onDeleteMessage, onReact, onPin, onUnpin, onForwardMessage, onCreatePoll, onStarMessage, chatId, chatTitle, isMonitoring, currentUserId }) {
+export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRetry, onBack, onOpenViewOnce, onToggleViewOnce, onSetDeleteAfter, onSetBurn, onToggleSilent, onClearSilent, onScheduleMessage, onDeleteMessage, onReact, onPin, onUnpin, onForwardMessage, onCreatePoll, onStarMessage, chatId, chatTitle, isMonitoring, currentUserId }) {
   const form = root.querySelector('[data-role="thread-form"]');
   const input = root.querySelector('[data-role="composer-input"]');
 
@@ -1084,7 +1102,11 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
 
   root.querySelector('[data-role="toggle-view-once"]')?.addEventListener('click', () => onToggleViewOnce?.());
   root.querySelector('[data-role="delete-after-select"]')?.addEventListener('change', (e) => onSetDeleteAfter?.(e.target.value));
+  root.querySelector('[data-role="burn-select"]')?.addEventListener('change', (e) => onSetBurn?.(e.target.value));
+  root.querySelector('[data-role="toggle-silent"]')?.addEventListener('click', () => onToggleSilent?.());
   root.querySelector('[data-role="clear-composer-modes"]')?.addEventListener('click', () => {
+    onSetBurn?.('off');
+    onClearSilent?.();
     onSetDeleteAfter?.('never');
     // Clear view-once only if it was active (chip exists in the mode bar)
     if (root.querySelector('.composer-mode-chip')) {

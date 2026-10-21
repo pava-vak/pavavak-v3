@@ -15,7 +15,9 @@ export function createChatThreadStore() {
     typingUsers: [],
     loadMoreStatus: 'idle',
     viewOnce: false,
-    deleteAfter: 'never'
+    deleteAfter: 'never',
+    silent: false,
+    burn: 'off'
   };
 
   let openGeneration = 0;
@@ -207,17 +209,19 @@ export function createChatThreadStore() {
       sendError: ''
     });
 
-    const { viewOnce, deleteAfter } = state;
+    const { viewOnce, deleteAfter, silent, burn } = state;
 
     try {
       const result = await sendMessage({
         chatId: state.chatId,
         text: trimmedText,
         viewOnce,
-        deleteAfter
+        deleteAfter,
+        silent,
+        burnAfterRead: burn
       });
       replaceOptimisticMessage(result.message, tempId);
-      setState({ viewOnce: false, deleteAfter: 'never' });
+      setState({ viewOnce: false, deleteAfter: 'never', silent: false, burn: 'off' });
       return result.message;
     } catch (error) {
       setState({
@@ -265,8 +269,18 @@ export function createChatThreadStore() {
 
     if (event === 'message:deleted') {
       setState({
+        items: state.items
+          // Disappearing and burned messages vanish instead of leaving a "deleted" bubble
+          .filter((item) => !(item.messageId === payload.messageId && (item.expiresAt || item.burnSeconds)))
+          .map((item) => item.messageId === payload.messageId ? { ...item, deleted: true, text: '' } : item)
+      });
+      return;
+    }
+
+    if (event === 'message:expiry' && payload.messageId) {
+      setState({
         items: state.items.map((item) =>
-          item.messageId === payload.messageId ? { ...item, deleted: true, text: '' } : item
+          item.messageId === payload.messageId ? { ...item, expiresAt: payload.expiresAt } : item
         )
       });
       return;
@@ -333,6 +347,23 @@ export function createChatThreadStore() {
     setState({ deleteAfter: value });
   }
 
+  function setSilent(value) {
+    setState({ silent: Boolean(value) });
+  }
+
+  function setBurn(value) {
+    setState({ burn: value || 'off' });
+  }
+
+  /** Drops messages whose timer ran out; returns true when something was removed. */
+  function pruneExpired() {
+    const now = Date.now();
+    const kept = state.items.filter((item) => !item.expiresAt || new Date(item.expiresAt).getTime() > now);
+    if (kept.length === state.items.length) return false;
+    setState({ items: kept });
+    return true;
+  }
+
   async function deleteMessage(messageId) {
     await requestDeleteMessage(messageId);
     setState({
@@ -367,7 +398,9 @@ export function createChatThreadStore() {
       typingUsers: [],
       loadMoreStatus: 'idle',
       viewOnce: false,
-      deleteAfter: 'never'
+      deleteAfter: 'never',
+      silent: false,
+      burn: 'off'
     });
   }
 
@@ -382,6 +415,9 @@ export function createChatThreadStore() {
     openViewOnce,
     setViewOnce,
     setDeleteAfter,
+    setSilent,
+    setBurn,
+    pruneExpired,
     notifyTyping,
     handleSocketEvent,
     reset,

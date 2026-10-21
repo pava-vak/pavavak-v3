@@ -50,11 +50,12 @@ function renderChatItem(item, activeChatId, onlineUserIds = new Set()) {
       </button>
       <button class="chat-delete-btn" data-role="delete-chat" data-chat-id="${escapeHtml(item.chatId)}" title="Delete chat" aria-label="Delete chat">🗑</button>
       ${archiveBtn}
+      <button class="chat-action-btn chat-hide-btn" data-role="hide-chat" data-chat-id="${escapeHtml(item.chatId)}" title="Hide chat" aria-label="Hide chat">🙈</button>
     </div>
   `;
 }
 
-export function renderChatListView(state, activeChatId = '', onlineUserIds = new Set()) {
+export function renderChatListView(state, activeChatId = '', onlineUserIds = new Set(), hiddenIds = new Set()) {
   if (state.status === 'loading') {
     return '<p class="sidebar-section-label" style="padding: 12px 16px; font-size: 13px; text-transform: none; letter-spacing: 0;">Loading chats…</p>';
   }
@@ -63,21 +64,30 @@ export function renderChatListView(state, activeChatId = '', onlineUserIds = new
     return `<div style="padding: 10px 16px;"><p class="error-text" style="margin: 0 0 8px;">${escapeHtml(state.error)}</p><button class="secondary-button" data-role="retry-chats">Retry</button></div>`;
   }
 
-  if (!state.items.length) {
+  // Hidden chats are only reachable from Settings → Privacy (or double-clicking your name)
+  const items = state.items.filter((item) => !hiddenIds.has(item.chatId));
+  if (!items.length) {
     return '<p style="padding: 10px 16px; margin: 0; color: var(--v3-muted); font-size: 13px;">No chats yet.</p>';
   }
 
   return `
     <div class="chat-list-panel">
       <div class="chat-list-items">
-        ${state.items.map((item) => renderChatItem(item, activeChatId, onlineUserIds)).join('')}
+        ${items.map((item) => renderChatItem(item, activeChatId, onlineUserIds)).join('')}
       </div>
       <p class="chat-list-secure-footer">🔒 Private and secure by default.</p>
     </div>
   `;
 }
 
-export function bindChatListView(root, { onOpenChat, onDeleteChat, onRetry, onArchive, onUnarchive }) {
+export function bindChatListView(root, { onOpenChat, onDeleteChat, onRetry, onArchive, onUnarchive, onHide }) {
+  root.querySelectorAll('[data-role="hide-chat"]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onHide?.(btn.dataset.chatId);
+    });
+  });
+
   root.querySelector('[data-role="retry-chats"]')?.addEventListener('click', () => onRetry?.());
 
   root.querySelectorAll('[data-role="open-chat"]').forEach((btn) => {

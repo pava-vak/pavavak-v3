@@ -88,6 +88,17 @@ export function renderSettingsModal(user = {}, biometricEnrolled = false) {
           </section>
 
           <section class="settings-section">
+            <h3 class="settings-section-title">Privacy</h3>
+            <p class="settings-section-sub">Ghost mode hides your online status, last seen, typing and blue ticks from everyone. While it's on, you won't see theirs either.</p>
+            <div class="settings-lock-row" style="margin-top:8px">
+              <span>👻 Ghost mode</span>
+              <button class="settings-lock-btn settings-lock-btn--off" data-role="ghost-toggle" disabled>…</button>
+            </div>
+            <p class="settings-section-sub" style="margin-top:12px">Hidden chats stay on this browser only and need your PIN or fingerprint to view.</p>
+            <button class="secondary-button" style="margin-top:8px" data-role="view-hidden-chats">🙈 Hidden chats</button>
+          </section>
+
+          <section class="settings-section">
             <h3 class="settings-section-title">Lock Screen Appearance</h3>
             <p class="settings-section-sub">Customise what shows on the lock screen when your app is locked.</p>
             ${(() => {
@@ -271,8 +282,29 @@ async function loadSessions(root) {
   }
 }
 
-export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onEnableBiometric, onRevokeBiometric, onDisableLock, onSetPin, onRemovePin, onSetLockTimer, onLockNow, onViewStarred, onSignOutAll }) {
+export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onEnableBiometric, onRevokeBiometric, onDisableLock, onSetPin, onRemovePin, onSetLockTimer, onLockNow, onViewStarred, onSignOutAll, onViewHidden }) {
   root.querySelector('[data-role="settings-close"]')?.addEventListener('click', onClose);
+  root.querySelector('[data-role="view-hidden-chats"]')?.addEventListener('click', () => onViewHidden?.());
+
+  // Ghost mode lives on the server so it applies to every device
+  const ghostBtn = root.querySelector('[data-role="ghost-toggle"]');
+  if (ghostBtn) {
+    const paint = (on) => {
+      ghostBtn.disabled = false;
+      ghostBtn.textContent = on ? 'On' : 'Off';
+      ghostBtn.classList.toggle('settings-lock-btn--on', on);
+      ghostBtn.classList.toggle('settings-lock-btn--off', !on);
+      ghostBtn.dataset.on = on ? '1' : '0';
+    };
+    import('../../shared/apiClient.js').then(({ getPrivacy, setGhostMode }) => {
+      getPrivacy().then((r) => paint(Boolean(r?.ghostMode))).catch(() => { ghostBtn.textContent = 'Unavailable'; });
+      ghostBtn.addEventListener('click', async () => {
+        const next = ghostBtn.dataset.on !== '1';
+        ghostBtn.disabled = true;
+        try { await setGhostMode(next); paint(next); } catch { paint(!next); }
+      });
+    });
+  }
 
   loadSessions(root);
   fetchAndroidRelease().then((release) => {

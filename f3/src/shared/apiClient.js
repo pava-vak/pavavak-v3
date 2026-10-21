@@ -210,6 +210,14 @@ export async function sendMessage(input) {
   });
 }
 
+export async function getPrivacy() {
+  return request('/api/v3/me/privacy');
+}
+
+export async function setGhostMode(ghostMode) {
+  return request('/api/v3/me/privacy', { method: 'PUT', body: JSON.stringify({ ghostMode }) });
+}
+
 export async function openViewOnceMessage(messageId) {
   return request(`/api/v3/messages/${encodeURIComponent(messageId)}/view-once-open`, { method: 'POST' });
 }

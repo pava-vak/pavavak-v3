@@ -4,7 +4,7 @@ import { bindLoginView, renderLoginView } from '../features/session/loginView.js
 import { createChatListStore } from '../features/chat-list/chatListStore.js';
 import { bindChatListView, renderChatListView } from '../features/chat-list/chatListView.js';
 import { createChatThreadStore } from '../features/chat-thread/chatThreadStore.js';
-import { bindChatThreadView, renderChatThreadView } from '../features/chat-thread/chatThreadView.js';
+import { bindChatThreadView, renderChatThreadView, expiryLabel } from '../features/chat-thread/chatThreadView.js';
 import { createPeopleStore } from '../features/people/peopleStore.js';
 import { bindPeopleView, renderPeopleView } from '../features/people/peopleView.js';
 import { createAdminStore } from '../features/admin/adminStore.js';
@@ -13,6 +13,10 @@ import { renderSettingsModal, bindSettingsModal } from '../features/settings/set
 import { renderOnboarding, requestPermissions } from '../features/onboarding/onboardingView.js';
 import { isEnabled as isLockEnabled, disable as disableLock, setPin, verifyPin, hasPin, clearPin, getLockTimer, setLockTimer, isSupported as isBiometricSupported, isPlatformAvailable, hasEnrolledLocally, checkEnrolled, enroll, verify, revoke as revokeBiometric } from '../shared/biometricLock.js';
 import { playMessageTone } from '../shared/notificationSound.js';
+import { bindHiddenChatsModal, getHiddenChats, renderHiddenChatsModal, setChatHidden, verifyOwner } from '../shared/privacyPrefs.js';
+
+// Chats hidden on this browser; refreshed on every render from localStorage
+let hiddenChatIds = new Set();
 import { subscribeSocket, getSocketStatus, onSocketConnect } from '../shared/socketClient.js';
 import { config } from '../shared/config.js';
 import { getActiveTheme, setTheme } from '../shared/themeStore.js';
@@ -53,7 +57,7 @@ function renderMobileBottomNav(user, mobileTab, totalUnread, canInstall) {
 function renderAuthenticatedView(user, chatState, peopleState, adminState, activeChat, threadState, composerValue = '', isMonitoring = false, viewOnce = false, deleteAfter = 'never', mobileTab = 'chats', canInstall = false, onlineUserIds = new Set(), reactions = null, pinnedMessage = null, threadSearch = null) {
   const socketStatus = getSocketStatus();
   const avatarLetter = escapeHtml((user.displayName || user.username || '?').slice(0, 1).toUpperCase());
-  const totalUnread = chatState.items.reduce((n, c) => n + (c.unreadCount || 0), 0);
+  const totalUnread = chatState.items.reduce((n, c) => n + (hiddenChatIds.has(c.chatId) ? 0 : (c.unreadCount || 0)), 0);
   const activeChatWithPresence = activeChat
     ? { ...activeChat, peerOnline: activeChat.peerId ? onlineUserIds.has(activeChat.peerId) : false }
     : null;
@@ -63,7 +67,7 @@ function renderAuthenticatedView(user, chatState, peopleState, adminState, activ
         <div class="sidebar-topbar">
           <div class="sidebar-topbar-avatar">${avatarLetter}</div>
           <div class="sidebar-topbar-info">
-            <span class="sidebar-topbar-name">${escapeHtml(user.displayName)}</span>
+            <span class="sidebar-topbar-name" data-role="secret-hidden-chats">${escapeHtml(user.displayName)}</span>
             <span class="sidebar-topbar-handle">@${escapeHtml(user.username)}</span>
           </div>
           <div class="sidebar-topbar-actions">
@@ -86,7 +90,7 @@ function renderAuthenticatedView(user, chatState, peopleState, adminState, activ
         </div>
         <div class="sidebar-body">
           <div class="sidebar-section-chats">
-            ${renderChatListView(chatState, activeChat?.chatId, onlineUserIds)}
+            ${renderChatListView(chatState, activeChat?.chatId, onlineUserIds, hiddenChatIds)}
           </div>
           <div class="sidebar-section-people">
             ${renderPeopleView(peopleState)}
@@ -444,6 +448,7 @@ export function renderAppShell(root) {
   let groupModalOpen = false;
   let groupModalState = { step: 'name', title: '', members: [], searchQuery: '', searchResults: [], loading: false, error: '' };
   let addUserModalOpen = false;
+  let hiddenModalOpen = false;
   let chatInfoOpen = false;
   let chatInfoMembers = null;
   let mobileTab = 'chats';
@@ -1246,11 +1251,12 @@ export function renderAppShell(root) {
 
     if (sessionState.status === 'authenticated' && sessionState.user) {
       const { viewOnce, deleteAfter } = chatThreadStore.getState();
+      hiddenChatIds = getHiddenChats(sessionState.user.userId);
       // On Android the native app replaces "Add to Home Screen"
       const showAndroidBanner = !!androidRelease && !androidBannerDismissed;
       const showInstallBanner = !showAndroidBanner && !!installPrompt && !installBannerDismissed;
       removeSplash();
-      const _totalUnread = chatState.items.reduce((n, c) => n + (c.unreadCount || 0), 0);
+      const _totalUnread = chatState.items.reduce((n, c) => n + (hiddenChatIds.has(c.chatId) ? 0 : (c.unreadCount || 0)), 0);
       updateFaviconBadge(_totalUnread);
       root.innerHTML = renderAuthenticatedView(
         sessionState.user,
@@ -1275,7 +1281,17 @@ export function renderAppShell(root) {
         + (searchOpen ? renderGlobalSearch(searchQuery, searchResults, searchLoading) : '')
         + (groupModalOpen ? renderGroupCreateModal(groupModalState) : '')
         + (addUserModalOpen ? renderAddUserModal(adminStore.getState()) : '')
-        + (chatInfoOpen && activeChat ? renderChatInfoPanel(activeChat, chatInfoMembers, sessionState.user?.userId) : '');
+        + (chatInfoOpen && activeChat ? renderChatInfoPanel(activeChat, chatInfoMembers, sessionState.user?.userId) : '')
+        + (hiddenModalOpen ? renderHiddenChatsModal(chatState.items.filter((c) => hiddenChatIds.has(c.chatId))) : '');
+      if (hiddenModalOpen) {
+        bindHiddenChatsModal(root, {
+          onOpen: (chatId) => { hiddenModalOpen = false; settingsOpen = false; openChat(chatId); },
+          onUnhide: (chatId) => { setChatHidden(sessionState.user.userId, chatId, false); showToast('Chat is back in your list', 'success'); render(); },
+          onClose: () => { hiddenModalOpen = false; render(); }
+        });
+      }
+      // Double-click your own name to open hidden chats
+      root.querySelector('[data-role="secret-hidden-chats"]')?.addEventListener('dblclick', () => openHiddenChats());
       root.querySelector('[data-role="sign-out"]')?.addEventListener('click', () => {
         sessionStore.signOut();
       });
@@ -1375,6 +1391,7 @@ export function renderAppShell(root) {
             settingsOpen = false;
             render();
           },
+          onViewHidden: () => openHiddenChats(),
           onViewStarred: () => {
             settingsOpen = false;
             render();
@@ -1408,6 +1425,15 @@ export function renderAppShell(root) {
             chatListStore.load();
           } catch (err) { showToast(err?.message || 'Archive failed'); }
         },
+        onHide: (chatId) => {
+          setChatHidden(sessionState.user.userId, chatId, true);
+          if (activeChat?.chatId === chatId) {
+            activeChat = null;
+            chatThreadStore.reset();
+          }
+          showToast('Chat hidden. See it in Settings → Privacy → Hidden chats.', 'success');
+          render();
+        },
         onUnarchive: async (chatId) => {
           try {
             const { archiveChat } = await import('../shared/apiClient.js');
@@ -1431,6 +1457,9 @@ export function renderAppShell(root) {
         onOpenViewOnce: (messageId) => chatThreadStore.openViewOnce(messageId),
         onToggleViewOnce: () => chatThreadStore.setViewOnce(!chatThreadStore.getState().viewOnce),
         onSetDeleteAfter: (value) => chatThreadStore.setDeleteAfter(value),
+        onSetBurn: (value) => chatThreadStore.setBurn(value),
+        onToggleSilent: () => chatThreadStore.setSilent(!chatThreadStore.getState().silent),
+        onClearSilent: () => chatThreadStore.setSilent(false),
         onScheduleMessage: async (text, scheduledAt) => {
           if (!activeChat) throw new Error('No active chat');
           const { scheduleMessage } = await import('../shared/apiClient.js');
@@ -1932,6 +1961,26 @@ export function renderAppShell(root) {
     return true; // handled — skip full render
   }
 
+  async function openHiddenChats() {
+    const ok = await verifyOwner();
+    if (ok === 'no-lock') { showToast('Set an app PIN in Settings → App Lock first, so only you can open hidden chats.'); return; }
+    if (!ok) return;
+    hiddenModalOpen = true;
+    render();
+  }
+
+  // Disappearing and burn-after-reading countdowns tick in place; expired messages are removed
+  setInterval(() => {
+    const items = chatThreadStore.getState().items || [];
+    if (!items.some((m) => m.expiresAt)) return;
+    if (chatThreadStore.pruneExpired()) return; // the store change re-renders the thread
+    for (const m of items) {
+      if (!m.expiresAt) continue;
+      const el = root.querySelector(`[data-message-id="${CSS.escape(m.messageId)}"] .bubble-expiry`);
+      if (el) el.textContent = expiryLabel(m.expiresAt, m);
+    }
+  }, 1000);
+
   subscribeSocket((event, payload) => {
     if (applyTypingInPlace(event, payload)) return; // typing handled in-place
     chatThreadStore.handleSocketEvent(event, payload);
@@ -1956,7 +2005,8 @@ export function renderAppShell(root) {
     }
     if (event === 'message:new' && payload.chatId) {
       const isActiveChat = payload.chatId === threadState.chatId;
-      if (payload.message?.direction === 'incoming' && !document.hidden) {
+      if (payload.message?.direction === 'incoming' && !document.hidden
+          && !payload.message?.silent && !hiddenChatIds.has(payload.chatId)) {
         playMessageTone();
       }
       // No scroll indicator needed — new messages always auto-scroll to bottom
