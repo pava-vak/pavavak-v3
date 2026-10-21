@@ -79,28 +79,28 @@ async function markDelivered(user, chatId, messageId) {
   return getStore().markDelivered(user, chatId, messageId);
 }
 
-async function markRead(user, chatId, messageId) {
+async function markRead(user, chatId, messageId, opts = {}) {
   assertStorageConfigured();
   if (env.CHAT_STORAGE_MODE === 'dual-write' && env.DATABASE_URL) {
     const [legacy, normalized] = await Promise.all([
       dbRepo.markRead(user, chatId, messageId),
-      normalizedRepo.markRead(user, chatId, messageId)
+      normalizedRepo.markRead(user, chatId, messageId, opts)
     ]);
     return normalized ?? legacy;
   }
-  return getStore().markRead(user, chatId, messageId);
+  return getStore().markRead(user, chatId, messageId, opts);
 }
 
-async function markChatRead(user, chatId) {
+async function markChatRead(user, chatId, opts = {}) {
   assertStorageConfigured();
   if (env.CHAT_STORAGE_MODE === 'dual-write' && env.DATABASE_URL) {
     const [legacy, normalized] = await Promise.all([
       dbRepo.markChatRead(user, chatId),
-      normalizedRepo.markChatRead(user, chatId)
+      normalizedRepo.markChatRead(user, chatId, opts)
     ]);
     return normalized ?? legacy;
   }
-  return getStore().markChatRead(user, chatId);
+  return getStore().markChatRead(user, chatId, opts);
 }
 
 async function listChatIdsForUser(user) {

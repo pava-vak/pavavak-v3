@@ -2,6 +2,16 @@
 const { requireAuth } = require('../../shared/security/auth.preHandler');
 const { markDelivered, markRead, markChatRead } = require('./receipt.service');
 const realtime = require('../../realtime/eventEmitter');
+const chatAdapter = require('../../db/chatAdapter');
+const { isGhost, startBurnTimers } = require('../privacy/privacy');
+
+/** Tells both members when a burn-after-reading message will disappear. */
+async function announceBurns(readerId, chatId, messageIds) {
+  const burns = await startBurnTimers(readerId, messageIds).catch(() => []);
+  if (!burns.length) return;
+  const members = await chatAdapter.getConversationMemberUserIds(chatId).catch(() => [readerId]);
+  for (const burn of burns) realtime.emitToUsers(members, 'message:expiry', burn);
+}
 
 const receiptBodySchema = z.object({
   chatId: z.string().min(1)
@@ -56,13 +66,17 @@ function registerReceiptRoutes(app) {
     }
 
     try {
-      const result = await markRead(request.auth, parsed.data.chatId, request.params.messageId);
-      realtime.emitMessageRead(result.senderUserId || request.auth.userId, {
-        chatId: parsed.data.chatId,
-        messageId: result.messageId,
-        status: result.status,
-        unreadCount: result.unreadCount
-      });
+      const ghost = await isGhost(request.auth.userId);
+      const result = await markRead(request.auth, parsed.data.chatId, request.params.messageId, { hidden: ghost });
+      if (!ghost) {
+        realtime.emitMessageRead(result.senderUserId || request.auth.userId, {
+          chatId: parsed.data.chatId,
+          messageId: result.messageId,
+          status: result.status,
+          unreadCount: result.unreadCount
+        });
+      }
+      await announceBurns(request.auth.userId, parsed.data.chatId, [result.messageId]);
       return {
         success: true,
         messageId: result.messageId,
@@ -86,16 +100,20 @@ function registerReceiptRoutes(app) {
     config: { rateLimit: { max: 30, timeWindow: '1 minute' } }
   }, async (request, reply) => {
     try {
-      const result = await markChatRead(request.auth, request.params.chatId);
+      const ghost = await isGhost(request.auth.userId);
+      const result = await markChatRead(request.auth, request.params.chatId, { hidden: ghost });
       realtime.emitChatUpdated(request.auth.userId, {
         chatId: request.params.chatId,
         unreadCount: 0,
         lastMessage: result.lastMessage || null
       });
-      for (const receipt of result.updatedReceipts || []) {
-        const readPayload = { chatId: request.params.chatId, messageId: receipt.messageId, status: 'read', unreadCount: 0 };
-        realtime.emitMessageRead(receipt.senderUserId || request.auth.userId, readPayload);
+      if (!ghost) {
+        for (const receipt of result.updatedReceipts || []) {
+          const readPayload = { chatId: request.params.chatId, messageId: receipt.messageId, status: 'read', unreadCount: 0 };
+          realtime.emitMessageRead(receipt.senderUserId || request.auth.userId, readPayload);
+        }
       }
+      await announceBurns(request.auth.userId, request.params.chatId, result.updatedMessageIds);
       return {
         success: true,
         chatId: request.params.chatId,

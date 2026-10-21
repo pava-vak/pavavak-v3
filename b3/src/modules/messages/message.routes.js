@@ -5,6 +5,7 @@ const realtime = require('../../realtime/eventEmitter');
 const { sendPushToUser } = require('../notifications/push.service');
 const { getPool } = require('../../db/pool');
 const { canAccessFile, fileIdFromBody } = require('../media/mediaAccess');
+const { BURN_SECONDS } = require('../privacy/privacy');
 
 const DELETE_AFTER_DURATIONS = {
   '1h': 60 * 60 * 1000,
@@ -16,7 +17,10 @@ const sendMessageSchema = z.object({
   chatId: z.string().min(1),
   text: z.string().trim().min(1).max(4000),
   viewOnce: z.boolean().default(false),
-  deleteAfter: z.enum(['never', '1h', '24h', '7d']).default('never')
+  deleteAfter: z.enum(['never', '1h', '24h', '7d']).default('never'),
+  // No sound, banner or push for the recipient
+  silent: z.boolean().default(false),
+  burnAfterRead: z.enum(['off', '10s', '1m', '5m', '1h']).default('off')
 });
 
 function registerMessageRoutes(app) {
@@ -24,6 +28,7 @@ function registerMessageRoutes(app) {
     try {
       const { messageId, conversationId, memberIds } = await chatAdapter.deleteMessage(request.auth, request.params.messageId);
       realtime.emitMessageDeletedToMembers(conversationId, messageId, memberIds);
+      for (const id of memberIds) realtime.emitChatUpdated(id, { chatId: conversationId, reload: true });
       return { success: true };
     } catch (error) {
       const status = error.status || 500;
@@ -106,7 +111,12 @@ function registerMessageRoutes(app) {
         request.auth,
         parsed.data.chatId,
         parsed.data.text,
-        { viewOnce: parsed.data.viewOnce, expiresAt }
+        {
+          viewOnce: parsed.data.viewOnce,
+          expiresAt,
+          silent: parsed.data.silent,
+          burnSeconds: BURN_SECONDS[parsed.data.burnAfterRead]
+        }
       );
 
       const memberIds = await chatAdapter.getConversationMemberUserIds(parsed.data.chatId);
@@ -149,7 +159,7 @@ function registerMessageRoutes(app) {
         });
 
         // Send Web Push only to recipients who are not the sender and have not muted the chat
-        if (!isSender && !mutedUserIds.has(memberId)) {
+        if (!isSender && !mutedUserIds.has(memberId) && !parsed.data.silent) {
           sendPushToUser(memberId, {
             chatId: parsed.data.chatId,
             title: 'PaVa Vak',

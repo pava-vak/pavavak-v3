@@ -246,6 +246,8 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
          msg.deleted_at,
          msg.edited_at,
          msg.forwarded_from_id,
+         msg.silent,
+         msg.burn_seconds,
          r.view_once_opened_at,
          case
            when msg.deleted_at is not null then ''
@@ -277,7 +279,7 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
        left join lateral (
          select
            count(*) filter (where peer.user_id != msg.sender_id) as peer_count,
-           count(*) filter (where peer.user_id != msg.sender_id and peer.read_at is not null) as read_count,
+           count(*) filter (where peer.user_id != msg.sender_id and peer.read_at is not null and not peer.read_hidden) as read_count,
            count(*) filter (where peer.user_id != msg.sender_id and peer.delivered_at is not null) as delivered_count
          from v3_message_receipts peer
          where peer.message_id = msg.message_id
@@ -309,6 +311,8 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
     edited: Boolean(row.edited_at),
     editedAt: row.edited_at?.toISOString?.() || row.edited_at || null,
     forwarded: Boolean(row.forwarded_from_id),
+    silent: Boolean(row.silent),
+    burnSeconds: row.burn_seconds != null ? Number(row.burn_seconds) : null,
     poll: row.poll_question ? {
       question: row.poll_question,
       options: Array.isArray(row.poll_options) ? row.poll_options : JSON.parse(row.poll_options || '[]'),
@@ -324,7 +328,7 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
   };
 }
 
-async function appendOutgoingMessage(user, chatId, text, messageId = null, { viewOnce = false, expiresAt = null } = {}) {
+async function appendOutgoingMessage(user, chatId, text, messageId = null, { viewOnce = false, expiresAt = null, silent = false, burnSeconds = null } = {}) {
   await ensureSeededForUser(user);
   const db = getPool();
   const exists = await db.query(
@@ -348,7 +352,9 @@ async function appendOutgoingMessage(user, chatId, text, messageId = null, { vie
     status: 'sent',
     viewOnce: Boolean(viewOnce),
     viewOnceOpened: false,
-    expiresAt: expiresAt || null
+    expiresAt: expiresAt || null,
+    silent: Boolean(silent),
+    burnSeconds: burnSeconds || null
   };
 
   const membersResult = await db.query(
@@ -365,9 +371,9 @@ async function appendOutgoingMessage(user, chatId, text, messageId = null, { vie
   try {
     await client.query('begin');
     await client.query(
-      `insert into v3_messages (message_id, conversation_id, sender_id, body, view_once, expires_at, created_at)
-       values ($1, $2, $3, $4, $5, $6::timestamptz, $7::timestamptz)`,
-      [resolvedMessageId, chatId, user.userId, text, Boolean(viewOnce), expiresAt, sentAt]
+      `insert into v3_messages (message_id, conversation_id, sender_id, body, view_once, expires_at, created_at, silent, burn_seconds)
+       values ($1, $2, $3, $4, $5, $6::timestamptz, $7::timestamptz, $8, $9)`,
+      [resolvedMessageId, chatId, user.userId, text, Boolean(viewOnce), expiresAt, sentAt, Boolean(silent), burnSeconds || null]
     );
 
     if (mediaFileId) {
@@ -513,7 +519,7 @@ async function markDelivered(user, chatId, messageId) {
   return { messageId, status: 'delivered', senderUserId };
 }
 
-async function markRead(user, chatId, messageId) {
+async function markRead(user, chatId, messageId, { hidden = false } = {}) {
   await ensureSeededForUser(user);
   const db = getPool();
   const client = await db.connect();
@@ -521,7 +527,8 @@ async function markRead(user, chatId, messageId) {
     await client.query('begin');
     const updated = await client.query(
       `update v3_message_receipts r
-       set read_at = coalesce(read_at, now()),
+       set read_hidden = case when r.read_at is null then $4 else r.read_hidden end,
+           read_at = coalesce(read_at, now()),
            delivered_at = coalesce(delivered_at, now())
        from v3_messages msg
        where r.message_id = msg.message_id
@@ -530,7 +537,7 @@ async function markRead(user, chatId, messageId) {
          and r.message_id = $3
          and msg.sender_id != $1
        returning r.message_id, msg.sender_id`,
-      [user.userId, chatId, messageId]
+      [user.userId, chatId, messageId, Boolean(hidden)]
     );
     if (updated.rowCount === 0) {
       await client.query('rollback');
@@ -552,12 +559,14 @@ async function markRead(user, chatId, messageId) {
       [user.userId, chatId, unreadCount]
     );
     const senderUserId = Number(updated.rows[0].sender_id);
-    await client.query(
-      `update v3_user_chat_summaries
-       set last_message_status = 'read', updated_at = now()
-       where user_id = $1 and conversation_id = $2 and last_message_id = $3`,
-      [senderUserId, chatId, messageId]
-    );
+    if (!hidden) {
+      await client.query(
+        `update v3_user_chat_summaries
+         set last_message_status = 'read', updated_at = now()
+         where user_id = $1 and conversation_id = $2 and last_message_id = $3`,
+        [senderUserId, chatId, messageId]
+      );
+    }
     await client.query('commit');
     return { messageId, status: 'read', unreadCount, senderUserId };
   } catch (error) {
@@ -568,7 +577,7 @@ async function markRead(user, chatId, messageId) {
   }
 }
 
-async function markChatRead(user, chatId) {
+async function markChatRead(user, chatId, { hidden = false } = {}) {
   await ensureSeededForUser(user);
   const db = getPool();
   const client = await db.connect();
@@ -586,6 +595,7 @@ async function markChatRead(user, chatId) {
     const updated = await client.query(
       `update v3_message_receipts r
        set read_at = coalesce(read_at, now()),
+           read_hidden = $3,
            delivered_at = coalesce(delivered_at, now())
        from v3_messages msg
        where r.message_id = msg.message_id
@@ -594,7 +604,7 @@ async function markChatRead(user, chatId) {
          and msg.sender_id != $1
          and r.read_at is null
        returning r.message_id, msg.sender_id`,
-      [user.userId, chatId]
+      [user.userId, chatId, Boolean(hidden)]
     );
 
     // Clear reader's unread count
@@ -606,7 +616,7 @@ async function markChatRead(user, chatId) {
     );
 
     // Update each sender's summary to 'read' so offline senders see correct tick on next load
-    if (updated.rows.length > 0) {
+    if (updated.rows.length > 0 && !hidden) {
       const senderIds = [...new Set(updated.rows.map(r => Number(r.sender_id)))];
       const messageIds = updated.rows.map(r => r.message_id);
       await client.query(
@@ -834,6 +844,14 @@ async function clearChatMessages(user, chatId) {
   return hideChatForUser(user, chatId, { removeFromList: false });
 }
 
+/** A deleted or expired message must not live on as a chat-list preview. */
+async function scrubPreview(messageId, label) {
+  await getPool().query(
+    `update v3_user_chat_summaries set last_message_preview = $2, updated_at = now() where last_message_id = $1`,
+    [messageId, label]
+  );
+}
+
 async function deleteMessage(user, messageId) {
   const db = getPool();
   // Admins can delete any message; regular users can only delete their own
@@ -849,6 +867,7 @@ async function deleteMessage(user, messageId) {
     throw Object.assign(new Error('Message not found or permission denied'), { status: 404 });
   }
   const { conversation_id: conversationId } = result.rows[0];
+  await scrubPreview(messageId, '🚫 This message was deleted');
   const memberResult = await db.query(
     'select user_id from v3_conversation_members where conversation_id = $1',
     [conversationId]
@@ -929,5 +948,6 @@ module.exports = {
   deleteMessage,
   deleteConversation,
   ensureClearedColumn,
+  scrubPreview,
   broadcastSystemUpdate
 };

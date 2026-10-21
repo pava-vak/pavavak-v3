@@ -10,8 +10,8 @@ async function markDelivered(user, chatId, messageId) {
   return result;
 }
 
-async function markRead(user, chatId, messageId) {
-  const result = await chatAdapter.markRead(user, chatId, messageId);
+async function markRead(user, chatId, messageId, opts) {
+  const result = await chatAdapter.markRead(user, chatId, messageId, opts);
   if (!result) {
     const error = new Error('Message not found');
     error.status = 404;
@@ -20,8 +20,8 @@ async function markRead(user, chatId, messageId) {
   return result;
 }
 
-async function markChatRead(user, chatId) {
-  const result = await chatAdapter.markChatRead(user, chatId);
+async function markChatRead(user, chatId, opts) {
+  const result = await chatAdapter.markChatRead(user, chatId, opts);
   if (!result) {
     const error = new Error('Chat not found');
     error.status = 404;

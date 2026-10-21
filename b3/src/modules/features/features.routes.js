@@ -381,6 +381,11 @@ function registerFeatureRoutes(app) {
         [userId, request.auth.userId]
       );
       if (!rows.length) return reply.status(404).send({ success: false, error: 'User not found' });
+      // Ghost mode works both ways: hidden users can't be seen, and can't see others
+      const { isGhost } = require('../privacy/privacy');
+      if (await isGhost(userId) || await isGhost(request.auth.userId)) {
+        return { success: true, online: false, lastSeenAt: null, hidden: true };
+      }
       return { success: true, online: isUserOnline(userId), lastSeenAt: rows[0].last_seen_at };
     } catch (err) {
       return reply.status(500).send({ success: false, error: 'Internal server error' });

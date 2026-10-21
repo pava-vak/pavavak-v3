@@ -10,6 +10,7 @@ const { registerChatListRoutes } = require('../modules/chat-list/chatList.routes
 const { registerChatThreadRoutes } = require('../modules/chat-thread/chatThread.routes');
 const { registerMessageRoutes } = require('../modules/messages/message.routes');
 const { registerReceiptRoutes } = require('../modules/receipts/receipt.routes');
+const { registerPrivacyRoutes } = require('../modules/privacy/privacy');
 const { registerUserRoutes } = require('../modules/users/user.routes');
 const { registerAdminRoutes } = require('../modules/admin/admin.routes');
 const { registerPushRoutes } = require('../modules/notifications/push.routes');
@@ -68,6 +69,7 @@ function buildApp() {
     registerChatThreadRoutes(instance);
     registerMessageRoutes(instance);
     registerReceiptRoutes(instance);
+    registerPrivacyRoutes(instance);
     registerUserRoutes(instance);
     registerAdminRoutes(instance);
     registerPushRoutes(instance);

@@ -8,6 +8,7 @@ const {
 } = require('./connectionRegistry');
 const chatAdapter = require('../db/chatAdapter');
 const { getPool } = require('../db/pool');
+const { isGhost, isGhostCached } = require('../modules/privacy/privacy');
 
 const typingTimers = new Map();
 
@@ -63,7 +64,9 @@ function attachSocketServer(httpServer) {
         socket.data.chatIdSet.add(chatId);
       }
 
-      for (const chatId of chatIds) {
+      // Ghost mode: never announce this user as online
+      const ghost = await isGhost(user.userId);
+      for (const chatId of ghost ? [] : chatIds) {
         socket.to(`chat:${chatId}`).emit('presence:online', {
           chatId,
           userId: user.userId,
@@ -97,6 +100,7 @@ function attachSocketServer(httpServer) {
 
     socket.on('typing:start', ({ chatId }) => {
       if (!chatId || !socket.data.chatIdSet.has(chatId)) return;
+      if (isGhostCached(user.userId)) return;
 
       socket.to(`chat:${chatId}`).emit('typing:start', {
         chatId,
@@ -129,7 +133,7 @@ function attachSocketServer(httpServer) {
     socket.on('disconnect', () => {
       clearTypingTimersForUser(user.userId);
       removeConnection(user.userId, socket.id);
-      if (!isUserOnline(user.userId)) {
+      if (!isUserOnline(user.userId) && !isGhostCached(user.userId)) {
         const lastSeenAt = new Date().toISOString();
         getPool().query('update v3_users set last_seen_at=$1 where user_id=$2', [lastSeenAt, user.userId]).catch(() => {});
         const chatIds = [...socket.data.chatIdSet];

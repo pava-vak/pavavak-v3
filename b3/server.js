@@ -9,6 +9,7 @@ const biometricRepo = require('./src/modules/biometric/biometric.repository');
 const sessionsRepo = require('./src/modules/auth/sessions.repository');
 const mediaAccess = require('./src/modules/media/mediaAccess');
 const normalizedChat = require('./src/db/normalizedChat.repository');
+const privacy = require('./src/modules/privacy/privacy');
 
 let app;
 let io;
@@ -19,6 +20,7 @@ async function start() {
   io = attachSocketServer(app.server);
 
   await normalizedChat.ensureClearedColumn();
+  await privacy.ensureColumns();
   await mediaAccess.ensureTable();
   const port = env.PORT;
   await app.listen({ port, host: '0.0.0.0' });
