@@ -66,6 +66,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pavavak.app.data.ChatRepository
+import com.pavavak.app.data.AppLock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.VisibilityOff
 import com.pavavak.app.data.ChatSummary
 import com.pavavak.app.data.User
 import com.pavavak.app.data.previewText
@@ -87,8 +91,14 @@ fun ChatListScreen(
     onScheduled: () -> Unit,
     onSettings: () -> Unit,
     onAdmin: () -> Unit,
+    lock: AppLock,
+    hidePreviews: Boolean,
+    onHiddenChats: () -> Unit,
 ) {
     val state by repository.chatList.collectAsStateWithLifecycle()
+    val hidden by lock.hiddenChats.collectAsStateWithLifecycle()
+    val lockedChats by lock.lockedChats.collectAsStateWithLifecycle()
+    val decoy by lock.decoy.collectAsStateWithLifecycle()
     val typing by repository.typing.collectAsStateWithLifecycle()
     val online by repository.online.collectAsStateWithLifecycle()
     var menuOpen by remember { mutableStateOf(false) }
@@ -97,14 +107,20 @@ fun ChatListScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    val visible = state.chats.filter { it.archived == archived }
-    val archivedCount = state.chats.count { it.archived }
+    // Hidden chats never appear here; with the decoy PIN nothing does
+    val listed = if (decoy) emptyList() else state.chats.filter { it.chatId !in hidden }
+    val visible = listed.filter { it.archived == archived }
+    val archivedCount = listed.count { it.archived }
 
     Scaffold(
         containerColor = PavaColors.Background,
         topBar = {
             TopAppBar(
-                title = { Text(if (archived) "Archived" else "PaVa Vak", fontWeight = FontWeight.Bold) },
+                // Long-press the title to open hidden chats (after PIN or fingerprint)
+                title = {
+                    Text(if (archived) "Archived" else "PaVa Vak", fontWeight = FontWeight.Bold,
+                        modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { if (!decoy && !archived) onHiddenChats() }))
+                },
                 navigationIcon = {
                     if (archived) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                 },
@@ -118,7 +134,7 @@ fun ChatListScreen(
                                 onClick = { menuOpen = false; onStarred() })
                             DropdownMenuItem(text = { Text("Scheduled messages") }, leadingIcon = { Icon(Icons.Filled.Schedule, null) },
                                 onClick = { menuOpen = false; onScheduled() })
-                            if (user.isAdmin) DropdownMenuItem(text = { Text("Admin") }, leadingIcon = { Icon(Icons.Filled.AdminPanelSettings, null) },
+                            if (user.isAdmin && !decoy) DropdownMenuItem(text = { Text("Admin") }, leadingIcon = { Icon(Icons.Filled.AdminPanelSettings, null) },
                                 onClick = { menuOpen = false; onAdmin() })
                             DropdownMenuItem(text = { Text("Settings") }, leadingIcon = { Icon(Icons.Filled.Settings, null) },
                                 onClick = { menuOpen = false; onSettings() })
@@ -157,6 +173,7 @@ fun ChatListScreen(
                     }
                     items(visible, key = { it.chatId }) { chat ->
                         ChatRow(chat, typingName = typing[chat.chatId], online = chat.peerUserId in online,
+                            hidePreview = hidePreviews, locked = chat.chatId in lockedChats,
                             onClick = { onOpenChat(chat.chatId) }, onLongClick = { sheetFor = chat })
                         HorizontalDivider(Modifier.padding(start = 76.dp), color = PavaColors.Outline)
                     }
@@ -175,6 +192,16 @@ fun ChatListScreen(
             }
             SheetAction(if (chat.muted) Icons.Filled.VolumeUp else Icons.Filled.NotificationsOff, if (chat.muted) "Unmute" else "Mute") {
                 repository.setMuted(chat.chatId, !chat.muted); sheetFor = null
+            }
+            SheetAction(Icons.Filled.VisibilityOff, "Hide chat") {
+                lock.setHidden(chat.chatId, true); sheetFor = null
+                context.toast("Hidden. Long-press \"PaVa Vak\" at the top to see hidden chats.")
+            }
+            val isLocked = chat.chatId in lockedChats
+            SheetAction(if (isLocked) Icons.Filled.LockOpen else Icons.Filled.Lock, if (isLocked) "Remove chat lock" else "Lock chat") {
+                sheetFor = null
+                if (!isLocked && !lock.isConfigured()) context.toast("Turn on app lock in Settings first")
+                else lock.setChatLocked(chat.chatId, !isLocked)
             }
             SheetAction(Icons.Filled.DeleteOutline, "Delete chat", destructive = true) { confirmDelete = chat; sheetFor = null }
             Spacer(Modifier.height(24.dp))
@@ -203,7 +230,10 @@ fun SheetAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: St
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatRow(chat: ChatSummary, typingName: String?, online: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun ChatRow(
+    chat: ChatSummary, typingName: String?, online: Boolean, hidePreview: Boolean, locked: Boolean,
+    onClick: () -> Unit, onLongClick: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -221,12 +251,14 @@ private fun ChatRow(chat: ChatSummary, typingName: String?, online: Boolean, onC
             Spacer(Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val last = chat.lastMessage
-                if (typingName == null && last?.direction == "outgoing" && !last.text.isNullOrEmpty()) {
+                if (!locked && typingName == null && last?.direction == "outgoing" && !last.text.isNullOrEmpty()) {
                     TickIcon(last.status.orEmpty(), Modifier.padding(end = 4.dp))
                 }
                 val preview = when {
+                    locked -> "🔒 Locked chat"
                     typingName != null -> "typing…"
                     last == null -> chat.subtitle.orEmpty()
+                    hidePreview -> if (chat.unreadCount > 0) "New message" else "Message"
                     last.text.isNullOrEmpty() -> if (last.direction == "incoming") "👁 Message" else ""
                     else -> previewText(last.text)
                 }

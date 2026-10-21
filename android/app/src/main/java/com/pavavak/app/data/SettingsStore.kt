@@ -19,6 +19,12 @@ class SettingsStore(context: Context) {
         val onboarded: Boolean,
         val appIcon: String,
         val chime: Boolean,
+        /** Show "New message" instead of the text in the chat list and banners. */
+        val hidePreviews: Boolean,
+        /** Shake the phone to lock and hide the app instantly. */
+        val shakeToHide: Boolean,
+        /** Delete downloaded photos, videos and files whenever the app locks. */
+        val wipeMediaOnLock: Boolean,
     )
 
     private val _values = MutableStateFlow(read())
@@ -36,6 +42,9 @@ class SettingsStore(context: Context) {
         onboarded = prefs.getBoolean("onboarded", false),
         appIcon = prefs.getString("app_icon", "default") ?: "default",
         chime = prefs.getBoolean("chime", true),
+        hidePreviews = prefs.getBoolean("hide_previews", false),
+        shakeToHide = prefs.getBoolean("shake_to_hide", false),
+        wipeMediaOnLock = prefs.getBoolean("wipe_media_on_lock", true),
     )
 
     private fun edit(block: android.content.SharedPreferences.Editor.() -> Unit) {
@@ -53,6 +62,9 @@ class SettingsStore(context: Context) {
     fun setOnboarded(done: Boolean) = edit { putBoolean("onboarded", done) }
     fun setAppIcon(id: String) = edit { putString("app_icon", id) }
     fun setChime(on: Boolean) = edit { putBoolean("chime", on) }
+    fun setHidePreviews(on: Boolean) = edit { putBoolean("hide_previews", on) }
+    fun setShakeToHide(on: Boolean) = edit { putBoolean("shake_to_hide", on) }
+    fun setWipeMediaOnLock(on: Boolean) = edit { putBoolean("wipe_media_on_lock", on) }
 
     /** Lock-related settings are per device user; cleared on sign-out together with the PIN. */
     fun clearLock() = edit {

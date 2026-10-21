@@ -171,9 +171,7 @@ fun LockScreen(settings: SettingsStore.Values, lock: AppLock) {
                     enabled = !waiting,
                     onComplete = { pin, reset ->
                         scope.launch {
-                            if (lock.verifyPin(pin)) {
-                                lock.unlock()
-                            } else {
+                            if (lock.unlockWithPin(pin) == AppLock.PinResult.Wrong) {
                                 failures++
                                 error = "Wrong PIN"
                                 if (failures % 5 == 0) lockedUntil = System.currentTimeMillis() + 30_000L * (failures / 5)

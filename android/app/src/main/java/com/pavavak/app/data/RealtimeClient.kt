@@ -112,7 +112,7 @@ class RealtimeClient(
         val EVENTS = listOf(
             "message:new", "message:deleted", "message:edited", "message:delivered", "message:read",
             "chat:new", "chat:updated", "chat:removed", "typing:start", "typing:stop",
-            "presence:online", "presence:offline", "message:reaction", "chat:pinned", "poll:voted",
+            "presence:online", "presence:offline", "message:reaction", "chat:pinned", "poll:voted", "message:expiry",
         )
     }
 }

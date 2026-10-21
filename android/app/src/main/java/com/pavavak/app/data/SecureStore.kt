@@ -52,6 +52,35 @@ class SecureStore(context: Context) {
         get() = prefs.getString(KEY_PIN, null)
         set(value) = prefs.edit().putString(KEY_PIN, value).apply()
 
+    /** Decoy PIN as "salt:hash": unlocking with it opens an empty-looking app. */
+    var decoyPinRecord: String?
+        get() = prefs.getString(KEY_DECOY_PIN, null)
+        set(value) = prefs.edit().putString(KEY_DECOY_PIN, value).apply()
+
+    /** Chats hidden from the list (kept on this phone only, never sent to the server). */
+    var hiddenChats: Set<String>
+        get() = prefs.getStringSet(KEY_HIDDEN, emptySet())?.toSet() ?: emptySet()
+        set(value) = prefs.edit().putStringSet(KEY_HIDDEN, value).apply()
+
+    /** Chats that need the PIN or fingerprint to open. */
+    var lockedChats: Set<String>
+        get() = prefs.getStringSet(KEY_LOCKED, emptySet())?.toSet() ?: emptySet()
+        set(value) = prefs.edit().putStringSet(KEY_LOCKED, value).apply()
+
+    /** Wrong PIN attempts since the last successful unlock, and when the last one happened. */
+    var failedUnlocks: Int
+        get() = prefs.getInt(KEY_FAILED, 0)
+        set(value) = prefs.edit().putInt(KEY_FAILED, value).apply()
+    var lastFailedUnlockAt: Long
+        get() = prefs.getLong(KEY_FAILED_AT, 0L)
+        set(value) = prefs.edit().putLong(KEY_FAILED_AT, value).apply()
+
+    /** Everything tied to the signed-in person's privacy setup on this phone. */
+    fun clearPrivacy() {
+        prefs.edit().remove(KEY_PIN).remove(KEY_DECOY_PIN).remove(KEY_HIDDEN).remove(KEY_LOCKED)
+            .remove(KEY_FAILED).remove(KEY_FAILED_AT).apply()
+    }
+
     fun clearSession() {
         prefs.edit().remove(KEY_ACCESS).remove(KEY_SESSION).remove(KEY_COOKIES).remove(KEY_USER).apply()
     }
@@ -63,5 +92,10 @@ class SecureStore(context: Context) {
         const val KEY_COOKIES = "cookies"
         const val KEY_USER = "user"
         const val KEY_PIN = "app_lock_pin"
+        const val KEY_DECOY_PIN = "decoy_pin"
+        const val KEY_HIDDEN = "hidden_chats"
+        const val KEY_LOCKED = "locked_chats"
+        const val KEY_FAILED = "failed_unlocks"
+        const val KEY_FAILED_AT = "failed_unlock_at"
     }
 }

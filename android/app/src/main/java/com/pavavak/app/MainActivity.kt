@@ -11,6 +11,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -52,6 +53,12 @@ import com.pavavak.app.data.SettingsStore
 import com.pavavak.app.data.User
 import com.pavavak.app.data.previewText
 import com.pavavak.app.ui.AdminScreen
+import com.pavavak.app.ui.EmptyState
+import com.pavavak.app.ui.SimpleTopBar
+import com.pavavak.app.ui.ShakeDetector
+import com.pavavak.app.ui.IntruderAlert
+import com.pavavak.app.ui.HiddenChatsScreen
+import com.pavavak.app.ui.AuthGate
 import com.pavavak.app.ui.Avatar
 import com.pavavak.app.ui.ChatListScreen
 import com.pavavak.app.ui.ChatScreen
@@ -125,6 +132,7 @@ private object Routes {
     const val DEVICES = "devices"
     const val ADMIN = "admin"
     const val MONITOR = "monitor/{chatId}?title={title}"
+    const val HIDDEN = "hidden"
 
     fun chat(id: String) = "chat/${Uri.encode(id)}"
     fun info(id: String) = "info/${Uri.encode(id)}"
@@ -166,7 +174,8 @@ private fun SignedInApp(repository: ChatRepository, settingsStore: SettingsStore
     LaunchedEffect(Unit) {
         repository.incoming.collect { event ->
             val chat = repository.chat(event.chatId)
-            if (chat?.muted == true) return@collect
+            // Silent messages, muted and hidden chats, and the decoy app never make a sound or a banner
+            if (chat?.muted == true || event.message.silent || event.chatId in lock.hiddenChats.value || lock.decoy.value) return@collect
             if (settingsStore.current.chime && !lock.locked.value) {
                 runCatching { RingtoneManager.getRingtone(context, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))?.play() }
             }
@@ -174,6 +183,15 @@ private fun SignedInApp(repository: ChatRepository, settingsStore: SettingsStore
         }
     }
     LaunchedEffect(banner) { if (banner != null) { delay(3500); banner = null } }
+
+    val activity = context as? android.app.Activity
+    val shake by settingsStore.values.collectAsStateWithLifecycle()
+    ShakeDetector(enabled = shake.shakeToHide) {
+        banner = null
+        lock.lockNow()
+        activity?.moveTaskToBack(true)
+    }
+    IntruderAlert(lock)
 
     Box(Modifier.fillMaxSize()) {
         AppNavHost(nav, repository, settingsStore, lock, user)
@@ -185,7 +203,8 @@ private fun SignedInApp(repository: ChatRepository, settingsStore: SettingsStore
             val event = banner
             if (event != null) InAppBanner(
                 title = repository.chat(event.chatId)?.displayTitle ?: event.message.senderDisplayName ?: "New message",
-                text = previewText(event.message.text, event.message.viewOnce),
+                text = if (settingsStore.current.hidePreviews || event.chatId in lock.lockedChats.value) "New message"
+                    else previewText(event.message.text, event.message.viewOnce),
                 onClick = { banner = null; nav.navigate(Routes.chat(event.chatId)) { launchSingleTop = true } },
             )
         }
@@ -215,9 +234,21 @@ private fun AppNavHost(nav: NavHostController, repository: ChatRepository, setti
     val openChat: (String) -> Unit = { id -> nav.navigate(Routes.chat(id)) { launchSingleTop = true } }
     val idArg = listOf(navArgument("chatId") { type = NavType.StringType })
 
+    val settings by settingsStore.values.collectAsStateWithLifecycle()
+    val decoy by lock.decoy.collectAsStateWithLifecycle()
+    val unlockedChats by lock.unlockedChats.collectAsStateWithLifecycle()
+    val lockedChats by lock.lockedChats.collectAsStateWithLifecycle()
+
     NavHost(nav, startDestination = Routes.CHATS) {
-        composable(Routes.CHATS) { ChatList(repository, user, nav, archived = false) }
-        composable(Routes.ARCHIVED) { ChatList(repository, user, nav, archived = true) }
+        composable(Routes.CHATS) { ChatList(repository, user, nav, archived = false, lock, settings.hidePreviews) }
+        composable(Routes.ARCHIVED) { ChatList(repository, user, nav, archived = true, lock, settings.hidePreviews) }
+        composable(Routes.HIDDEN) {
+            var open by remember { mutableStateOf(false) }
+            AuthGate("Hidden chats", "Confirm it's you to see hidden chats", lock, settings, unlocked = open,
+                onUnlocked = { open = true }, onCancel = back) {
+                HiddenChatsScreen(repository, lock, onOpenChat = { id -> lock.markChatUnlocked(id); openChat(id) }, onBack = back)
+            }
+        }
         composable(Routes.NEW_CHAT) {
             NewChatScreen(repository, onBack = back, onChatStarted = { id ->
                 nav.navigate(Routes.chat(id)) { popUpTo(Routes.CHATS) }
@@ -225,11 +256,15 @@ private fun AppNavHost(nav: NavHostController, repository: ChatRepository, setti
         }
         composable(Routes.CHAT, idArg) { entry ->
             val chatId = entry.arguments?.getString("chatId").orEmpty()
-            ChatScreen(
-                repository, chatId, onBack = back,
-                onOpenInfo = { nav.navigate(Routes.info(chatId)) },
-                onOpenGallery = { nav.navigate(Routes.gallery(chatId, false, repository.chat(chatId)?.displayTitle ?: "Media")) },
-            )
+            AuthGate("Locked chat", "Confirm it's you to open ${repository.chat(chatId)?.displayTitle ?: "this chat"}", lock, settings,
+                unlocked = chatId !in lockedChats || chatId in unlockedChats,
+                onUnlocked = { lock.markChatUnlocked(chatId) }, onCancel = back) {
+                ChatScreen(
+                    repository, chatId, onBack = back,
+                    onOpenInfo = { nav.navigate(Routes.info(chatId)) },
+                    onOpenGallery = { nav.navigate(Routes.gallery(chatId, false, repository.chat(chatId)?.displayTitle ?: "Media")) },
+                )
+            }
         }
         composable(Routes.INFO, idArg) { entry ->
             val chatId = entry.arguments?.getString("chatId").orEmpty()
@@ -251,15 +286,17 @@ private fun AppNavHost(nav: NavHostController, repository: ChatRepository, setti
             GalleryScreen(repository, args?.getString("chatId").orEmpty(), args?.getString("title") ?: "Media",
                 admin = args?.getBoolean("admin") == true, onBack = back)
         }
-        composable(Routes.SEARCH) { SearchScreen(repository, onBack = back, onOpenChat = openChat) }
-        composable(Routes.STARRED) { StarredScreen(repository, onBack = back, onOpenChat = openChat) }
-        composable(Routes.SCHEDULED) { ScheduledScreen(repository, onBack = back) }
+        // The decoy app shows nothing from the real account
+        composable(Routes.SEARCH) { if (decoy) DecoyEmpty("Search messages", back) else SearchScreen(repository, onBack = back, onOpenChat = openChat) }
+        composable(Routes.STARRED) { if (decoy) DecoyEmpty("Starred messages", back) else StarredScreen(repository, onBack = back, onOpenChat = openChat) }
+        composable(Routes.SCHEDULED) { if (decoy) DecoyEmpty("Scheduled messages", back) else ScheduledScreen(repository, onBack = back) }
         composable(Routes.SETTINGS) {
-            SettingsScreen(repository, settingsStore, lock, user, onBack = back, onDevices = { nav.navigate(Routes.DEVICES) })
+            SettingsScreen(repository, settingsStore, lock, user, onBack = back, onDevices = { nav.navigate(Routes.DEVICES) },
+                onHiddenChats = { nav.navigate(Routes.HIDDEN) })
         }
         composable(Routes.DEVICES) { DevicesScreen(repository, onBack = back) }
         composable(Routes.ADMIN) {
-            if (user.isAdmin) AdminScreen(repository, onBack = back, onMonitor = { c -> nav.navigate(Routes.monitor(c.chatId, c.label)) })
+            if (user.isAdmin && !decoy) AdminScreen(repository, onBack = back, onMonitor = { c -> nav.navigate(Routes.monitor(c.chatId, c.label)) })
             else LaunchedEffect(Unit) { nav.popBackStack() }
         }
         composable(
@@ -268,14 +305,21 @@ private fun AppNavHost(nav: NavHostController, repository: ChatRepository, setti
         ) { entry ->
             val chatId = entry.arguments?.getString("chatId").orEmpty()
             val title = entry.arguments?.getString("title") ?: "Chat"
-            if (user.isAdmin) MonitorChatScreen(repository, chatId, title, onBack = back,
+            if (user.isAdmin && !decoy) MonitorChatScreen(repository, chatId, title, onBack = back,
                 onGallery = { nav.navigate(Routes.gallery(chatId, true, title)) })
         }
     }
 }
 
 @Composable
-private fun ChatList(repository: ChatRepository, user: User, nav: NavHostController, archived: Boolean) {
+private fun DecoyEmpty(title: String, onBack: () -> Unit) {
+    androidx.compose.material3.Scaffold(containerColor = PavaColors.Background, topBar = { SimpleTopBar(title, onBack) }) { padding ->
+        Box(Modifier.padding(padding)) { EmptyState(androidx.compose.material.icons.Icons.Filled.Inbox, "Nothing here", "No messages yet.") }
+    }
+}
+
+@Composable
+private fun ChatList(repository: ChatRepository, user: User, nav: NavHostController, archived: Boolean, lock: AppLock, hidePreviews: Boolean) {
     ChatListScreen(
         repository = repository,
         user = user,
@@ -289,5 +333,8 @@ private fun ChatList(repository: ChatRepository, user: User, nav: NavHostControl
         onScheduled = { nav.navigate(Routes.SCHEDULED) },
         onSettings = { nav.navigate(Routes.SETTINGS) },
         onAdmin = { nav.navigate(Routes.ADMIN) },
+        lock = lock,
+        hidePreviews = hidePreviews,
+        onHiddenChats = { nav.navigate(Routes.HIDDEN) },
     )
 }

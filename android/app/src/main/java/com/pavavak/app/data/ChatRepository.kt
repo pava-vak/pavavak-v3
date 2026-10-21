@@ -274,33 +274,36 @@ class ChatRepository(
     }
 
     /** Sends text (optionally a reply, view-once, or auto-deleting) with an optimistic bubble. */
-    fun send(chatId: String, text: String, viewOnce: Boolean = false, deleteAfter: String = "never", replyTo: Message? = null) {
+    fun send(chatId: String, text: String, viewOnce: Boolean = false, deleteAfter: String = "never", replyTo: Message? = null,
+             silent: Boolean = false, burn: String = "off") {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
         val body = if (replyTo != null) replyBody(replyTo, trimmed) else trimmed
-        sendBody(chatId, body, viewOnce, deleteAfter)
+        sendBody(chatId, body, viewOnce, deleteAfter, silent, burn)
     }
 
-    fun sendBody(chatId: String, body: String, viewOnce: Boolean = false, deleteAfter: String = "never") {
+    fun sendBody(chatId: String, body: String, viewOnce: Boolean = false, deleteAfter: String = "never",
+                 silent: Boolean = false, burn: String = "off") {
         val localId = "local-${UUID.randomUUID()}"
         val pending = Message(messageId = localId, direction = "outgoing", text = body, sentAt = Instant.now().toString(),
-            status = "sending", viewOnce = viewOnce)
+            status = "sending", viewOnce = viewOnce, silent = silent)
         updateThread(chatId) { it.copy(messages = it.messages + pending) }
         scope.launch {
-            runCatching { api.send(chatId, body, viewOnce, deleteAfter) }
+            runCatching { api.send(chatId, body, viewOnce, deleteAfter, silent, burn) }
                 .onSuccess { sent -> replaceLocal(chatId, localId, sent) }
                 .onFailure { markFailed(chatId, localId) }
         }
     }
 
     /** Uploads first (bubble shows "Sending photo…"), then sends the media marker body. */
-    fun sendMedia(chatId: String, label: String, viewOnce: Boolean, deleteAfter: String, upload: suspend () -> String) {
+    fun sendMedia(chatId: String, label: String, viewOnce: Boolean, deleteAfter: String, silent: Boolean = false, burn: String = "off",
+                  upload: suspend () -> String) {
         val localId = "local-${UUID.randomUUID()}"
         val pending = Message(messageId = localId, direction = "outgoing", text = "$UPLOADING$label",
             sentAt = Instant.now().toString(), status = "sending")
         updateThread(chatId) { it.copy(messages = it.messages + pending) }
         scope.launch {
-            runCatching { val body = upload(); api.send(chatId, body, viewOnce, deleteAfter) }
+            runCatching { val body = upload(); api.send(chatId, body, viewOnce, deleteAfter, silent, burn) }
                 .onSuccess { sent -> replaceLocal(chatId, localId, sent) }
                 .onFailure { e ->
                     updateThread(chatId) { s ->
@@ -467,6 +470,14 @@ class ChatRepository(
                 }
                 if (chatId != null) patchChat(chatId) { c ->
                     if (c.lastMessage?.messageId == messageId) c.copy(lastMessage = c.lastMessage.copy(status = status)) else c
+                }
+            }
+            "message:expiry" -> {
+                // Burn after reading started: both sides count down, the server deletes it when time is up
+                val messageId = obj.str("messageId") ?: return
+                val expiresAt = obj.str("expiresAt") ?: return
+                if (chatId != null) updateThread(chatId) { s ->
+                    s.copy(messages = s.messages.map { if (it.messageId == messageId) it.copy(expiresAt = expiresAt) else it })
                 }
             }
             "message:deleted" -> {

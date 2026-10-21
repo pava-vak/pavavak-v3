@@ -98,8 +98,13 @@ private enum class SettingsDialog { Name, Password, Timer, LockName, ResetIcon, 
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(repository: ChatRepository, settingsStore: SettingsStore, lock: AppLock, user: User, onBack: () -> Unit, onDevices: () -> Unit) {
+fun SettingsScreen(
+    repository: ChatRepository, settingsStore: SettingsStore, lock: AppLock, user: User,
+    onBack: () -> Unit, onDevices: () -> Unit, onHiddenChats: () -> Unit,
+) {
     val settings by settingsStore.values.collectAsStateWithLifecycle()
+    // Opened with the decoy PIN: nothing here may reveal or change the real privacy setup
+    val decoy by lock.decoy.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var dialog by remember { mutableStateOf<SettingsDialog?>(null) }
@@ -136,6 +141,7 @@ fun SettingsScreen(repository: ChatRepository, settingsStore: SettingsStore, loc
                 Icon(Icons.Filled.Edit, "Edit name", tint = PavaColors.TextMuted)
             }
 
+            if (!decoy) {
             Section("App lock")
             SwitchRow(Icons.Filled.Lock, "Lock with PIN", if (hasPin) "PIN is set" else "Ask for a 4-digit PIN to open the app", hasPin) { on ->
                 if (on) settingPin = true else { lock.removePin(); hasPin = false }
@@ -162,6 +168,9 @@ fun SettingsScreen(repository: ChatRepository, settingsStore: SettingsStore, loc
                 }
                 Row_(Icons.Filled.LockClock, "Lock now", "Lock the app right away") { lock.lockNow() }
                 Row_(Icons.Filled.Lock, "Turn off app lock", null, destructive = true) { dialog = SettingsDialog.LockOff }
+            }
+
+            PrivacySection(repository, settingsStore, lock, onHiddenChats)
             }
 
             Section("Lock screen look")
@@ -210,8 +219,10 @@ fun SettingsScreen(repository: ChatRepository, settingsStore: SettingsStore, loc
             }
 
             Section("Account")
-            Row_(Icons.Filled.Devices, "Linked devices", "See and sign out other devices") { onDevices() }
-            Row_(Icons.Filled.Key, "Change password", null) { dialog = SettingsDialog.Password }
+            if (!decoy) {
+                Row_(Icons.Filled.Devices, "Linked devices", "See and sign out other devices") { onDevices() }
+                Row_(Icons.Filled.Key, "Change password", null) { dialog = SettingsDialog.Password }
+            }
             Row_(Icons.AutoMirrored.Filled.Logout, "Sign out", null, destructive = true) { dialog = SettingsDialog.SignOut }
 
             Section("About")

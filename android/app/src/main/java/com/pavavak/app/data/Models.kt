@@ -111,6 +111,10 @@ data class Message(
     val edited: Boolean = false,
     val forwarded: Boolean = false,
     val poll: Poll? = null,
+    /** Sent without sound or notification. */
+    val silent: Boolean = false,
+    /** Burn after reading: seconds after the recipient reads it before it is deleted for both. */
+    val burnSeconds: Int? = null,
     // Admin monitoring only
     val deletedAt: String? = null,
 ) {

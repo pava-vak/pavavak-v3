@@ -254,7 +254,12 @@ private fun QuoteBlock(quote: String) {
 private fun BubbleFooter(message: Message, outgoing: Boolean, monitor: Boolean, onBubble: Boolean) {
     val muted = if (onBubble) LocalContentColorAlpha(0.6f) else PavaColors.TextMuted
     Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        remainingLabel(message.expiresAt)?.let { Text("⏱ $it  ", fontSize = 11.sp, color = muted) }
+        val burning = message.burnSeconds != null
+        when {
+            message.expiresAt != null -> remainingLabel(message.expiresAt)?.let { Text((if (burning) "🔥 " else "⏱ ") + "$it  ", fontSize = 11.sp, color = muted) }
+            burning -> Text("🔥 ${burnLabel(message.burnSeconds!!)} after reading  ", fontSize = 11.sp, color = muted)
+        }
+        if (message.silent && outgoing) Text("🔕  ", fontSize = 11.sp, color = muted)
         if (message.edited) Text("edited  ", fontSize = 11.sp, color = muted)
         Text(formatTime(message.sentAt), fontSize = 11.sp, color = muted)
         if (outgoing && !monitor) {

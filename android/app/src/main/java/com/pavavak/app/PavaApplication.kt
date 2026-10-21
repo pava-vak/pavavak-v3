@@ -31,7 +31,10 @@ class PavaApplication : Application() {
         lock = AppLock(settings, store)
         val api = ApiClient(store)
         val realtime = RealtimeClient(api, store, scope)
-        repository = ChatRepository(api, store, realtime, MediaRepository(this, api), lock, scope)
+        val media = MediaRepository(this, api)
+        repository = ChatRepository(api, store, realtime, media, lock, scope)
+        // Nothing decrypted stays on disk while the app is locked
+        lock.onLocked = { if (settings.current.wipeMediaOnLock) media.clear() }
         repository.restoreSession()
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {

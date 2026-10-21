@@ -11,6 +11,10 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -102,9 +106,17 @@ val EMOJI = listOf(
     "✅", "❌", "⚠️", "❓", "❗", "💤", "💬", "👀", "🙈", "🙉", "🙊", "🤝", "🫶", "🫡", "🫠", "🥹", "😮‍💨", "🤌", "👑", "💎",
 )
 
-data class ComposerOptions(val viewOnce: Boolean = false, val deleteAfter: String = "never")
+data class ComposerOptions(
+    val viewOnce: Boolean = false,
+    val deleteAfter: String = "never",
+    /** No sound or notification for the recipient. */
+    val silent: Boolean = false,
+    /** Burn after reading: deleted for both this long after the recipient reads it. */
+    val burn: String = "off",
+)
 
 private val DELETE_AFTER = listOf("never" to "Off", "1h" to "1 hour", "24h" to "24 hours", "7d" to "7 days")
+val BURN_AFTER = listOf("off" to "Off", "10s" to "10 seconds", "1m" to "1 minute", "5m" to "5 minutes", "1h" to "1 hour")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -172,12 +184,16 @@ fun Composer(
 
     Column(Modifier.fillMaxWidth().background(PavaColors.Background)) {
         replyTo?.let { ReplyBar(it, onCancelReply) }
-        if (options.viewOnce || options.deleteAfter != "never") {
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (options != ComposerOptions()) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (options.viewOnce) Chip("👁 View once") { options = options.copy(viewOnce = false) }
                 if (options.deleteAfter != "never") Chip("⏱ ${DELETE_AFTER.first { it.first == options.deleteAfter }.second}") {
                     options = options.copy(deleteAfter = "never")
                 }
+                if (options.burn != "off") Chip("🔥 Burn ${BURN_AFTER.first { it.first == options.burn }.second} after reading") {
+                    options = options.copy(burn = "off")
+                }
+                if (options.silent) Chip("🔕 Silent") { options = options.copy(silent = false) }
             }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.Bottom) {
@@ -263,9 +279,25 @@ fun Composer(
                     }
                     AttachTile(Icons.Filled.Poll, "Poll", Color(0xFF10B981)) { showAttach = false; onPoll() }
                 }
+                Spacer(Modifier.height(18.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    AttachTile(Icons.Filled.LocalFireDepartment, "Burn", Color(0xFFDC2626)) {
+                        val idx = BURN_AFTER.indexOfFirst { it.first == options.burn }
+                        options = options.copy(burn = BURN_AFTER[(idx + 1) % BURN_AFTER.size].first)
+                    }
+                    AttachTile(Icons.Filled.NotificationsOff, if (options.silent) "Silent ✓" else "Silent", Color(0xFF64748B)) {
+                        options = options.copy(silent = !options.silent); showAttach = false
+                    }
+                    Spacer(Modifier.width(64.dp))
+                    Spacer(Modifier.width(64.dp))
+                }
                 if (options.deleteAfter != "never") Text(
                     "Auto-delete: ${DELETE_AFTER.first { it.first == options.deleteAfter }.second} (tap again to change)",
                     color = PavaColors.TextMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 12.dp).align(Alignment.CenterHorizontally),
+                )
+                if (options.burn != "off") Text(
+                    "Burn after reading: ${BURN_AFTER.first { it.first == options.burn }.second} (tap again to change)",
+                    color = PavaColors.TextMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp).align(Alignment.CenterHorizontally),
                 )
             }
         }

@@ -134,9 +134,14 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
         onDispose { repository.closeChat(chatId); AudioPlayer.stop() }
     }
 
-    val visibleMessages = remember(thread.messages, searchQuery, searchOpen) {
-        if (searchOpen && searchQuery.length >= 2) thread.messages.filter { it.text.contains(searchQuery, ignoreCase = true) && !it.viewOnce }
-        else thread.messages
+    // Disappearing and burn-after-reading messages vanish on time, even before the server's delete arrives
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    val counting = thread.messages.any { it.expiresAt != null }
+    LaunchedEffect(counting) { while (counting) { nowMs = System.currentTimeMillis(); kotlinx.coroutines.delay(1000) } }
+    val visibleMessages = remember(thread.messages, searchQuery, searchOpen, nowMs) {
+        val alive = thread.messages.filter { m -> parseInstant(m.expiresAt)?.let { it.toEpochMilli() > nowMs } ?: true }
+        if (searchOpen && searchQuery.length >= 2) alive.filter { it.text.contains(searchQuery, ignoreCase = true) && !it.viewOnce }
+        else alive
     }
     val items = remember(visibleMessages) { buildItems(visibleMessages) }
     val listState = rememberLazyListState()
@@ -238,11 +243,11 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
             onCancelReply = { replyTo = null },
             initialDraft = drafts[chatId].orEmpty(),
             onDraftChange = { if (it.isEmpty()) drafts.remove(chatId) else drafts[chatId] = it },
-            onSendText = { text, o -> repository.send(chatId, text, o.viewOnce, o.deleteAfter, replyTo); replyTo = null },
-            onSendImage = { uri, o -> repository.sendMedia(chatId, "Sending photo…", o.viewOnce, o.deleteAfter) { "__IMG__:" + repository.media.uploadImage(uri) } },
-            onSendVideo = { uri, o -> repository.sendMedia(chatId, "Sending video…", o.viewOnce, o.deleteAfter) { "__VID__:" + repository.media.uploadVideo(uri) } },
-            onSendDocument = { uri, o -> repository.sendMedia(chatId, "Sending file…", false, o.deleteAfter) { repository.media.uploadDocument(uri) } },
-            onSendVoice = { file, o -> repository.sendMedia(chatId, "Sending voice note…", false, o.deleteAfter) { "__AUD__:" + repository.media.uploadVoice(file) } },
+            onSendText = { text, o -> repository.send(chatId, text, o.viewOnce, o.deleteAfter, replyTo, o.silent, o.burn); replyTo = null },
+            onSendImage = { uri, o -> repository.sendMedia(chatId, "Sending photo…", o.viewOnce, o.deleteAfter, o.silent, o.burn) { "__IMG__:" + repository.media.uploadImage(uri) } },
+            onSendVideo = { uri, o -> repository.sendMedia(chatId, "Sending video…", o.viewOnce, o.deleteAfter, o.silent, o.burn) { "__VID__:" + repository.media.uploadVideo(uri) } },
+            onSendDocument = { uri, o -> repository.sendMedia(chatId, "Sending file…", false, o.deleteAfter, o.silent, o.burn) { repository.media.uploadDocument(uri) } },
+            onSendVoice = { file, o -> repository.sendMedia(chatId, "Sending voice note…", false, o.deleteAfter, o.silent, o.burn) { "__AUD__:" + repository.media.uploadVoice(file) } },
             onTyping = { repository.setTyping(chatId, it) },
             onSchedule = { schedulingText = it },
             onPoll = { creatingPoll = true },

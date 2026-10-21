@@ -125,6 +125,10 @@ class ApiClient(private val store: SecureStore) {
     suspend fun revokeSession(id: String) = execute("DELETE", "/api/v3/auth/sessions/${enc(id)}")
     suspend fun revokeAllSessions() = execute("DELETE", "/api/v3/auth/sessions")
 
+    suspend fun ghostMode(): Boolean =
+        (api(execute("GET", "/api/v3/me/privacy"))["ghostMode"] as? JsonPrimitive)?.content == "true"
+    suspend fun setGhostMode(on: Boolean) = execute("PUT", "/api/v3/me/privacy", obj("ghostMode" to on).toString())
+
     // ── People ──────────────────────────────────────────────────────────────
 
     suspend fun searchUsers(query: String): List<UserSearchResult> =
@@ -142,8 +146,10 @@ class ApiClient(private val store: SecureStore) {
     suspend fun thread(chatId: String, cursor: String? = null): ThreadResponse =
         decode(get("/api/v3/chats/${enc(chatId)}/messages", "limit" to "40", "cursor" to cursor))
 
-    suspend fun send(chatId: String, text: String, viewOnce: Boolean = false, deleteAfter: String = "never"): Message {
-        val body = obj("chatId" to chatId, "text" to text, "viewOnce" to viewOnce, "deleteAfter" to deleteAfter)
+    suspend fun send(chatId: String, text: String, viewOnce: Boolean = false, deleteAfter: String = "never",
+                     silent: Boolean = false, burn: String = "off"): Message {
+        val body = obj("chatId" to chatId, "text" to text, "viewOnce" to viewOnce, "deleteAfter" to deleteAfter,
+            "silent" to silent, "burnAfterRead" to burn)
         return decode<SendResponse>(execute("POST", "/api/v3/messages", body.toString())).message
     }
 

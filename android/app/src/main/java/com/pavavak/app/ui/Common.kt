@@ -134,12 +134,19 @@ fun dayLabel(date: LocalDate): String {
 
 fun localDateOf(iso: String?): LocalDate? = parseInstant(iso)?.atZone(zone)?.toLocalDate()
 
+fun burnLabel(seconds: Int): String = when {
+    seconds < 60 -> "${seconds}s"
+    seconds < 3600 -> "${seconds / 60}m"
+    else -> "${seconds / 3600}h"
+}
+
 /** "⏱ 5m" style remaining time for disappearing messages. */
 fun remainingLabel(iso: String?): String? {
     val end = parseInstant(iso) ?: return null
     val secs = ChronoUnit.SECONDS.between(Instant.now(), end).coerceAtLeast(0)
     return when {
-        secs < 3600 -> "${(secs / 60).coerceAtLeast(1)}m"
+        secs < 60 -> "${secs}s"
+        secs < 3600 -> "${secs / 60}m"
         secs < 86_400 -> "${secs / 3600}h"
         else -> "${secs / 86_400}d"
     }
