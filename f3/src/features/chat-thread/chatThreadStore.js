@@ -373,6 +373,13 @@ export function createChatThreadStore() {
     });
   }
 
+  // Remove a single message from my view only (others keep it)
+  async function deleteForMe(messageId) {
+    const { deleteMessageForMe } = await import('../../shared/apiClient.js');
+    await deleteMessageForMe(messageId);
+    setState({ items: state.items.filter((m) => m.messageId !== messageId) });
+  }
+
   async function clearChat() {
     if (!state.chatId) return;
     await requestClearChat(state.chatId);
@@ -411,6 +418,7 @@ export function createChatThreadStore() {
     loadMore,
     submitMessage,
     deleteMessage,
+    deleteForMe,
     clearChat,
     openViewOnce,
     setViewOnce,

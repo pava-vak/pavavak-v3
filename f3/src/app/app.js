@@ -392,6 +392,28 @@ function renderLoadingShell() {
   `;
 }
 
+async function openEditHistory(messageId) {
+  try {
+    const { fetchEditHistory } = await import('../shared/apiClient.js');
+    const r = await fetchEditHistory(messageId);
+    const edits = r?.edits || [];
+    const overlay = document.createElement('div');
+    overlay.className = 'privacy-pin-overlay';
+    const fmt = (t) => t ? new Date(t).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    overlay.innerHTML = `
+      <div class="privacy-pin-card">
+        <h3>Edit history</h3>
+        ${edits.length ? edits.map(e => `<div style="margin:8px 0"><div>${escapeHtml(e.text)}</div><div class="muted" style="font-size:0.75rem">${escapeHtml(fmt(e.editedAt))}</div></div>`).join('<hr style="border:none;border-top:1px solid var(--v3-border)">')
+          : '<p class="muted">No earlier versions.</p>'}
+        <div class="privacy-pin-actions"><button type="button" class="secondary-button" data-role="eh-close">Close</button></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector('[data-role="eh-close"]').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  } catch (e) { showToast(e?.message || 'Could not load history'); }
+}
+
 function showToast(message, type = 'error') {
   const existing = document.getElementById('pava-toast');
   if (existing) existing.remove();
@@ -1477,6 +1499,16 @@ export function renderAppShell(root) {
           root.querySelector('[data-role="composer-input"]').value = '';
         },
         onDeleteMessage: (messageId) => chatThreadStore.deleteMessage(messageId).catch(() => {}),
+        onDeleteForMe: (messageId) => chatThreadStore.deleteForMe(messageId).catch((e) => showToast(e?.message || 'Could not delete')),
+        onShowHistory: (messageId) => openEditHistory(messageId),
+        onSendWhenOnline: async (text) => {
+          if (!activeChat) return;
+          try {
+            const { sendWhenOnline } = await import('../shared/apiClient.js');
+            await sendWhenOnline(activeChat.chatId, text);
+            showToast(`Will send when ${activeChat.title || 'they'} are online`, 'success');
+          } catch (e) { showToast(e?.message || 'Could not queue'); }
+        },
         onReact: async (messageId, emoji) => {
           if (!activeChat) return;
           try {

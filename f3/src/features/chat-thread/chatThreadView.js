@@ -631,6 +631,7 @@ export function renderChatThreadView({ activeChat, threadState, composerValue = 
                   🔕 Send silently${threadState.silent ? ' ✓' : ''}
                 </button>
                 <button type="button" class="img-source-btn" data-role="schedule-message">🕐 Schedule</button>
+                <button type="button" class="img-source-btn" data-role="send-when-online">📶 Send when online</button>
                 <button type="button" class="img-source-btn" data-role="create-poll">📊 Poll</button>
               </div>
             </div>
@@ -1074,7 +1075,7 @@ function openScheduleModal(text, onScheduleMessage) {
   });
 }
 
-export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRetry, onBack, onOpenViewOnce, onToggleViewOnce, onSetDeleteAfter, onSetBurn, onToggleSilent, onClearSilent, onScheduleMessage, onDeleteMessage, onReact, onPin, onUnpin, onForwardMessage, onCreatePoll, onStarMessage, chatId, chatTitle, isMonitoring, currentUserId }) {
+export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRetry, onBack, onOpenViewOnce, onToggleViewOnce, onSetDeleteAfter, onSetBurn, onToggleSilent, onClearSilent, onScheduleMessage, onSendWhenOnline, onDeleteMessage, onDeleteForMe, onShowHistory, onReact, onPin, onUnpin, onForwardMessage, onCreatePoll, onStarMessage, chatId, chatTitle, isMonitoring, currentUserId }) {
   const form = root.querySelector('[data-role="thread-form"]');
   const input = root.querySelector('[data-role="composer-input"]');
 
@@ -1118,6 +1119,12 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
     const text = input?.value?.trim();
     if (!text) { input?.focus(); return; }
     openScheduleModal(text, onScheduleMessage);
+  });
+  root.querySelector('[data-role="send-when-online"]')?.addEventListener('click', () => {
+    const text = input?.value?.trim();
+    if (!text) { input?.focus(); return; }
+    onSendWhenOnline?.(text);
+    input.value = '';
   });
   root.querySelector('[data-role="create-poll"]')?.addEventListener('click', () => {
     openPollCreatorModal(onCreatePoll);
@@ -1736,6 +1743,7 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
     const isOutgoing = bubble.dataset.direction === 'outgoing';
     const rawText = bubble.querySelector('.message-text')?.textContent || '';
     const isMediaBubble = !!bubble.querySelector('[data-role="img-bubble"],[data-role="vid-bubble"],[data-role="aud-bubble"],[data-role="doc-bubble"]');
+    const isEdited = !!bubble.querySelector('.msg-edited-badge');
 
     const menu = document.createElement('div');
     menu.id = 'pava-ctx-menu';
@@ -1752,7 +1760,9 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
         <button class="ctx-action" data-action="forward">↪ Forward</button>
         <button class="ctx-action" data-action="pin">📌 Pin</button>
         <button class="ctx-action" data-action="star">⭐ Star</button>
-        ${isOutgoing ? `<button class="ctx-action ctx-action-danger" data-action="delete">🗑 Delete</button>` : ''}
+        ${isEdited && !isMediaBubble ? `<button class="ctx-action" data-action="history">🕘 Edit history</button>` : ''}
+        <button class="ctx-action ctx-action-danger" data-action="delete-for-me">🗑 Delete for me</button>
+        ${isOutgoing ? `<button class="ctx-action ctx-action-danger" data-action="delete">🗑 Delete for everyone</button>` : ''}
       </div>
     `;
 
@@ -1828,6 +1838,10 @@ export function bindChatThreadView(root, { onSubmit, onTyping, onLoadMore, onRet
         } else if (action === 'delete') {
           // The menu is already closed, so confirm with a dialog rather than a second tap on the item
           if (window.confirm('Delete this message for everyone?')) onDeleteMessage?.(messageId);
+        } else if (action === 'delete-for-me') {
+          if (window.confirm('Delete this message from your view only? The other person keeps it.')) onDeleteForMe?.(messageId);
+        } else if (action === 'history') {
+          onShowHistory?.(messageId);
         }
       });
     });
