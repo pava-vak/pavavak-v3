@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -58,6 +59,7 @@ import com.pavavak.app.ui.EmptyState
 import com.pavavak.app.ui.SimpleTopBar
 import com.pavavak.app.ui.ShakeDetector
 import com.pavavak.app.ui.IntruderAlert
+import com.pavavak.app.ui.UpdateDialog
 import com.pavavak.app.ui.HiddenChatsScreen
 import com.pavavak.app.ui.AuthGate
 import com.pavavak.app.ui.Avatar
@@ -251,6 +253,12 @@ private fun SignedInApp(repository: ChatRepository, settingsStore: SettingsStore
     }
     IntruderAlert(lock)
 
+    // Offer an in-place update when a newer build is published (checked on sign-in and each unlock)
+    val update = app.update
+    val updateAvailable by update.available.collectAsStateWithLifecycle()
+    val updateScope = rememberCoroutineScope()
+    LaunchedEffect(lockedNow) { if (!lockedNow) runCatching { update.check() } }
+
     Box(Modifier.fillMaxSize()) {
         AppNavHost(nav, repository, settingsStore, lock, user)
         AnimatedVisibility(
@@ -266,6 +274,15 @@ private fun SignedInApp(repository: ChatRepository, settingsStore: SettingsStore
                 onClick = { banner = null; nav.navigate(Routes.chat(event.chatId)) { launchSingleTop = true } },
             )
         }
+    }
+
+    val release = updateAvailable
+    if (release != null && !lockedNow) {
+        UpdateDialog(
+            update, release,
+            onDismiss = { update.dismiss() },
+            onUpdate = { updateScope.launch { update.downloadAndInstall(release) } },
+        )
     }
 }
 

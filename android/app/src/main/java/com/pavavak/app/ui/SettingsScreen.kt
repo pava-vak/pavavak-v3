@@ -34,7 +34,7 @@ import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockClock
@@ -226,7 +226,19 @@ fun SettingsScreen(
             Row_(Icons.AutoMirrored.Filled.Logout, "Sign out", null, destructive = true) { dialog = SettingsDialog.SignOut }
 
             Section("About")
-            Row_(Icons.Filled.Info, "PaVa Vak for Android", "Version ${BuildConfig.VERSION_NAME}") {}
+            val updateMgr = remember { (context.applicationContext as com.pavavak.app.PavaApplication).update }
+            val updateStatus by updateMgr.status.collectAsStateWithLifecycle()
+            val checking = updateStatus is com.pavavak.app.update.UpdateManager.Status.Checking
+            Row_(
+                Icons.Filled.SystemUpdate, "Check for updates",
+                if (checking) "Checking…" else "Version ${BuildConfig.VERSION_NAME} · tap to check",
+            ) {
+                scope.launch {
+                    val rel = updateMgr.check()
+                    if (rel == null) context.toast("You're on the latest version")
+                    // When newer, the update dialog appears automatically over this screen
+                }
+            }
             Text(
                 "🔒 Private and secure by default. Photos and videos only load when you tap them.",
                 color = PavaColors.TextMuted, fontSize = 12.sp, modifier = Modifier.padding(16.dp),

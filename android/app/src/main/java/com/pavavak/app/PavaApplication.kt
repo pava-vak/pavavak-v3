@@ -25,6 +25,8 @@ class PavaApplication : Application() {
         private set
     lateinit var push: com.pavavak.app.push.PushManager
         private set
+    lateinit var update: com.pavavak.app.update.UpdateManager
+        private set
 
     /** True while any screen of the app is visible; push notifications are skipped then. */
     @Volatile var isInForeground = false
@@ -44,6 +46,7 @@ class PavaApplication : Application() {
         val media = MediaRepository(this, api)
         repository = ChatRepository(api, store, realtime, media, lock, scope)
         push = com.pavavak.app.push.PushManager(this, api)
+        update = com.pavavak.app.update.UpdateManager(this, api)
         repository.beforeLogout = { push.unregister(); com.pavavak.app.push.Notifier.cancelAll(this) }
         lock.onHiddenChanged = { chatId, hidden -> scope.launch { runCatching { api.setChatHidden(chatId, hidden) } } }
         // Register for push on every sign-in (and on launch when already signed in)
@@ -51,6 +54,8 @@ class PavaApplication : Application() {
             repository.session.collect { s ->
                 if (s is com.pavavak.app.data.SessionState.SignedIn) {
                     push.register()
+                    // Quietly see whether a newer build has been published
+                    runCatching { update.check() }
                     // Hidden chats are shared by all of this account's devices
                     runCatching { api.hiddenChats().toSet() }.onSuccess { server ->
                         for (id in lock.mergeHiddenFromServer(server)) runCatching { api.setChatHidden(id, true) }
