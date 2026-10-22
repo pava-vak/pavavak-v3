@@ -200,6 +200,11 @@ function registerFeatureRoutes(app) {
         return reply.status(403).send({ success: false, error: 'Cannot edit another person\'s message' });
       if (/^__[A-Z]+__:/.test(text) || /^__[A-Z]+__:/.test(msg.body || '') || msg.view_once)
         return reply.status(400).send({ success: false, error: 'Only text messages can be edited' });
+      // Keep the previous version for edit history
+      await db.query(
+        'insert into v3_message_edits(message_id, old_body, edited_at) values($1, $2, coalesce((select edited_at from v3_messages where message_id=$1), now()))',
+        [request.params.messageId, msg.body]
+      );
       await db.query(
         'update v3_messages set body=$1, edited_at=now() where message_id=$2',
         [text, request.params.messageId]
@@ -383,7 +388,8 @@ function registerFeatureRoutes(app) {
       if (!rows.length) return reply.status(404).send({ success: false, error: 'User not found' });
       // Ghost mode works both ways: hidden users can't be seen, and can't see others
       const { isGhost } = require('../privacy/privacy');
-      if (await isGhost(userId) || await isGhost(request.auth.userId)) {
+      const { isBlockedBetween } = require('./extras');
+      if (await isGhost(userId) || await isGhost(request.auth.userId) || await isBlockedBetween(db, userId, request.auth.userId)) {
         return { success: true, online: false, lastSeenAt: null, hidden: true };
       }
       return { success: true, online: isUserOnline(userId), lastSeenAt: rows[0].last_seen_at };

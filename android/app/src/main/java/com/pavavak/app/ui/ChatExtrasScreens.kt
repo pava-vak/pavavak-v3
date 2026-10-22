@@ -113,7 +113,13 @@ fun ContactInfoScreen(repository: ChatRepository, chatId: String, onBack: () -> 
     val context = LocalContext.current
     var confirm by remember { mutableStateOf<String?>(null) }
     val peer = chat?.peerUserId
-    LaunchedEffect(peer) { peer?.let { repository.refreshPresence(it) } }
+    var blocked by remember(peer) { mutableStateOf(false) }
+    LaunchedEffect(peer) {
+        peer?.let {
+            repository.refreshPresence(it)
+            runCatching { repository.api.blockedUsers() }.onSuccess { list -> blocked = list.contains(it.toString()) }
+        }
+    }
 
     Scaffold(containerColor = PavaColors.Background, topBar = { SimpleTopBar("Contact info", onBack) }) { padding ->
         if (chat == null) { SplashScreen(); return@Scaffold }
@@ -161,6 +167,14 @@ fun ContactInfoScreen(repository: ChatRepository, chatId: String, onBack: () -> 
                 context.toast(if (chat.archived) "Chat unarchived" else "Chat archived")
             }
             Row_(Icons.Filled.CleaningServices, "Clear chat", "Remove all messages for you", destructive = true) { confirm = "clear" }
+            if (peer != null) Row_(if (blocked) Icons.Filled.Block else Icons.Filled.Block, if (blocked) "Unblock" else "Block", if (blocked) "They can't message you" else "Stop this person messaging you", destructive = !blocked) {
+                scope.launch {
+                    val next = !blocked
+                    runCatching { repository.api.setBlocked(peer, next) }
+                        .onSuccess { blocked = next; context.toast(if (next) "Blocked" else "Unblocked") }
+                        .onFailure { context.toast(it.message ?: "Couldn't update") }
+                }
+            }
             Row_(Icons.Filled.DeleteOutline, "Delete chat", null, destructive = true) { confirm = "delete" }
             Spacer(Modifier.height(24.dp))
         }

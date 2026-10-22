@@ -75,6 +75,11 @@ class SecureStore(context: Context) {
         get() = prefs.getLong(KEY_FAILED_AT, 0L)
         set(value) = prefs.edit().putLong(KEY_FAILED_AT, value).apply()
 
+    /** Messages composed while offline, waiting to send (JSON). Survives app restarts. */
+    var outbox: String?
+        get() = prefs.getString(KEY_OUTBOX, null)
+        set(value) = prefs.edit().putString(KEY_OUTBOX, value).apply()
+
     /** Chat titles and mute state, so a push that arrives while the app is closed can be labelled without a network call. */
     var chatCache: String?
         get() = prefs.getString(KEY_CHAT_CACHE, null)
@@ -92,7 +97,7 @@ class SecureStore(context: Context) {
     }
 
     fun clearSession() {
-        prefs.edit().remove(KEY_ACCESS).remove(KEY_SESSION).remove(KEY_COOKIES).remove(KEY_USER).remove(KEY_CHAT_CACHE).apply()
+        prefs.edit().remove(KEY_ACCESS).remove(KEY_SESSION).remove(KEY_COOKIES).remove(KEY_USER).remove(KEY_CHAT_CACHE).remove(KEY_OUTBOX).apply()
     }
 
     private companion object {
@@ -104,6 +109,7 @@ class SecureStore(context: Context) {
         const val KEY_PIN = "app_lock_pin"
         const val KEY_DECOY_PIN = "decoy_pin"
         const val KEY_CHAT_CACHE = "chat_cache"
+        const val KEY_OUTBOX = "outbox"
         const val KEY_HIDDEN = "hidden_chats"
         const val KEY_HIDDEN_SYNCED = "hidden_chats_synced"
         const val KEY_LOCKED = "locked_chats"

@@ -79,6 +79,7 @@ import com.pavavak.app.ui.theme.PavaColors
 import com.pavavak.app.ui.theme.PavaTheme
 import com.pavavak.app.ui.theme.paletteFor
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** FragmentActivity because BiometricPrompt needs one. */
 class MainActivity : FragmentActivity() {
@@ -357,6 +358,7 @@ private fun DecoyEmpty(title: String, onBack: () -> Unit) {
 
 @Composable
 private fun ChatList(repository: ChatRepository, user: User, nav: NavHostController, archived: Boolean, lock: AppLock, hidePreviews: Boolean) {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     ChatListScreen(
         repository = repository,
         user = user,
@@ -367,6 +369,12 @@ private fun ChatList(repository: ChatRepository, user: User, nav: NavHostControl
         onBack = { nav.popBackStack() },
         onSearch = { nav.navigate(Routes.SEARCH) },
         onStarred = { nav.navigate(Routes.STARRED) },
+        onNotesToSelf = {
+            scope.launch {
+                runCatching { repository.startSelfChat() }
+                    .onSuccess { nav.navigate(Routes.chat(it.chatId)) { launchSingleTop = true } }
+            }
+        },
         onScheduled = { nav.navigate(Routes.SCHEDULED) },
         onSettings = { nav.navigate(Routes.SETTINGS) },
         onAdmin = { nav.navigate(Routes.ADMIN) },

@@ -109,6 +109,7 @@ data class Message(
     val expiresAt: String? = null,
     val deleted: Boolean = false,
     val edited: Boolean = false,
+    val editedAt: String? = null,
     val forwarded: Boolean = false,
     val poll: Poll? = null,
     /** Sent without sound or notification. */
@@ -203,6 +204,12 @@ data class ScheduledResponse(val items: List<ScheduledItem> = emptyList())
 
 @Serializable
 data class UploadResponse(val fileId: String)
+
+@Serializable
+data class EditVersion(val text: String = "", val editedAt: String? = null)
+
+@Serializable
+data class EditHistoryResponse(val edits: List<EditVersion> = emptyList())
 
 // ── Admin ───────────────────────────────────────────────────────────────────
 

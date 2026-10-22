@@ -13,6 +13,10 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.time.Instant
 import java.util.UUID
 
@@ -39,6 +43,18 @@ data class ThreadState(
 )
 
 data class IncomingEvent(val chatId: String, val message: Message, val chatOpen: Boolean)
+
+@Serializable
+private data class QueuedText(
+    val localId: String,
+    val chatId: String,
+    val body: String,
+    val viewOnce: Boolean = false,
+    val deleteAfter: String = "never",
+    val silent: Boolean = false,
+    val burn: String = "off",
+    val sentAt: String,
+)
 
 class ChatRepository(
     val api: ApiClient,
@@ -77,6 +93,12 @@ class ChatRepository(
     val incoming: SharedFlow<IncomingEvent> = _incoming
 
     private val linkPreviews = HashMap<String, LinkPreview?>()
+
+    // Offline outbox: text waits here (persisted) and media retries wait here (this session only),
+    // both auto-sent when the network returns.
+    private val outbox = java.util.Collections.synchronizedList(loadOutbox())
+    private val mediaRetries = ConcurrentHashMap<String, suspend () -> Unit>()
+    @Volatile private var flushing = false
 
     private var activeChatId: String? = null
     private var inForeground = true
@@ -123,7 +145,7 @@ class ChatRepository(
 
     fun onAppForeground() {
         inForeground = true
-        if (_session.value is SessionState.SignedIn) realtime.connect() // "connect" event reloads chats + open thread
+        if (_session.value is SessionState.SignedIn) { realtime.connect(); flushOutbox() } // "connect" event reloads chats + open thread
     }
 
     // ── Session ─────────────────────────────────────────────────────────────
@@ -198,6 +220,18 @@ class ChatRepository(
 
     suspend fun searchUsers(query: String) = api.searchUsers(query)
 
+    suspend fun startSelfChat(): ChatSummary {
+        val chat = api.startSelfChat()
+        _chatList.update { s -> if (s.chats.any { it.chatId == chat.chatId }) s else s.copy(chats = sortChats(listOf(chat) + s.chats)) }
+        return chat
+    }
+
+    /** Removes a single message from my view only (the other person and admin keep it). */
+    suspend fun deleteForMe(chatId: String, messageId: String) {
+        api.deleteForMe(messageId)
+        updateThread(chatId) { st -> st.copy(messages = st.messages.filter { it.messageId != messageId }) }
+    }
+
     fun chat(chatId: String): ChatSummary? = _chatList.value.chats.firstOrNull { it.chatId == chatId }
 
     private fun sortChats(chats: List<ChatSummary>) = chats.sortedByDescending { it.lastMessage?.sentAt.orEmpty() }
@@ -241,6 +275,7 @@ class ChatRepository(
         patchChat(chatId) { it.copy(unreadCount = 0) }
         val existing = _threads.value[chatId]
         updateThread(chatId) { (existing ?: ThreadState()).copy(loading = existing == null, error = null) }
+        injectQueued(chatId) // show any waiting-to-send messages immediately, even offline
         scope.launch {
             runCatching { api.thread(chatId) }
                 .onSuccess { page ->
@@ -256,9 +291,10 @@ class ChatRepository(
                             loading = false,
                         )
                     }
+                    injectQueued(chatId)
                     if (inForeground && activeChatId == chatId) markReadSoon(chatId)
                 }
-                .onFailure { e -> updateThread(chatId) { it.copy(loading = false, error = e.message) } }
+                .onFailure { e -> updateThread(chatId) { it.copy(loading = false, error = e.message) }; injectQueued(chatId) }
         }
         scope.launch { runCatching { api.reactions(chatId) }.onSuccess { r -> _reactions.update { it + (chatId to r) } } }
         scope.launch { runCatching { api.pinned(chatId) }.onSuccess { p -> _pinned.update { it + (chatId to p) } } }
@@ -310,34 +346,60 @@ class ChatRepository(
     fun sendBody(chatId: String, body: String, viewOnce: Boolean = false, deleteAfter: String = "never",
                  silent: Boolean = false, burn: String = "off") {
         val localId = "local-${UUID.randomUUID()}"
-        val pending = Message(messageId = localId, direction = "outgoing", text = body, sentAt = Instant.now().toString(),
+        val now = Instant.now().toString()
+        val pending = Message(messageId = localId, direction = "outgoing", text = body, sentAt = now,
             status = "sending", viewOnce = viewOnce, silent = silent)
         updateThread(chatId) { it.copy(messages = it.messages + pending) }
         scope.launch {
             runCatching { api.send(chatId, body, viewOnce, deleteAfter, silent, burn) }
                 .onSuccess { sent -> replaceLocal(chatId, localId, sent) }
-                .onFailure { markFailed(chatId, localId) }
+                .onFailure { e ->
+                    if (isRetryable(e)) {
+                        // No network / server busy: queue it and show "waiting", auto-send on reconnect
+                        enqueue(QueuedText(localId, chatId, body, viewOnce, deleteAfter, silent, burn, now))
+                        setStatus(chatId, localId, "queued")
+                    } else {
+                        markFailed(chatId, localId)
+                    }
+                }
         }
+    }
+
+    /** IOErrors, timeouts, 5xx and rate limits are worth retrying; a 4xx rejection is not. */
+    private fun isRetryable(e: Throwable): Boolean = when (e) {
+        is ApiException -> e.status >= 500 || e.status == 408 || e.status == 429
+        is IOException -> true
+        else -> false
     }
 
     /** Uploads first (bubble shows "Sending photo…"), then sends the media marker body. */
     fun sendMedia(chatId: String, label: String, viewOnce: Boolean, deleteAfter: String, silent: Boolean = false, burn: String = "off",
                   upload: suspend () -> String) {
         val localId = "local-${UUID.randomUUID()}"
+        var attemptRef: (suspend () -> Unit)? = null
         val pending = Message(messageId = localId, direction = "outgoing", text = "$UPLOADING$label",
             sentAt = Instant.now().toString(), status = "sending")
         updateThread(chatId) { it.copy(messages = it.messages + pending) }
-        scope.launch {
+        val attempt: suspend () -> Unit = {
             runCatching { val body = upload(); api.send(chatId, body, viewOnce, deleteAfter, silent, burn) }
-                .onSuccess { sent -> replaceLocal(chatId, localId, sent) }
+                .onSuccess { sent -> mediaRetries.remove(localId); replaceLocal(chatId, localId, sent) }
                 .onFailure { e ->
-                    updateThread(chatId) { s ->
-                        s.copy(messages = s.messages.map { m ->
-                            if (m.messageId == localId) m.copy(status = "failed", text = "$UPLOADING$label — ${e.message ?: "failed"}") else m
-                        })
+                    if (isRetryable(e)) {
+                        // Keep the upload closure and retry when back online (not persisted across restart)
+                        mediaRetries[localId] = { if (mediaRetries.containsKey(localId)) attemptRef!!() }
+                        setStatus(chatId, localId, "queued")
+                    } else {
+                        mediaRetries.remove(localId)
+                        updateThread(chatId) { s ->
+                            s.copy(messages = s.messages.map { m ->
+                                if (m.messageId == localId) m.copy(status = "failed", text = "$UPLOADING$label — ${e.message ?: "failed"}") else m
+                            })
+                        }
                     }
                 }
         }
+        attemptRef = attempt
+        scope.launch { attempt() }
     }
 
     private fun replaceLocal(chatId: String, localId: String, sent: Message) {
@@ -349,11 +411,67 @@ class ChatRepository(
         patchChat(chatId) { it.copy(lastMessage = LastMessage(sent.messageId, sent.text, sent.sentAt, "outgoing", sent.status)) }
     }
 
-    private fun markFailed(chatId: String, localId: String) = updateThread(chatId) { s ->
-        s.copy(messages = s.messages.map { m -> if (m.messageId == localId) m.copy(status = "failed") else m })
+    private fun markFailed(chatId: String, localId: String) = setStatus(chatId, localId, "failed")
+
+    private fun setStatus(chatId: String, localId: String, status: String) = updateThread(chatId) { s ->
+        s.copy(messages = s.messages.map { m -> if (m.messageId == localId) m.copy(status = status) else m })
+    }
+
+    // ── Offline outbox ────────────────────────────────────────────────────────
+
+    private fun loadOutbox(): MutableList<QueuedText> =
+        store.outbox?.let { runCatching { api.json.decodeFromString<List<QueuedText>>(it).toMutableList() }.getOrNull() } ?: mutableListOf()
+
+    private fun persistOutbox() { store.outbox = synchronized(outbox) { api.json.encodeToString(outbox.toList()) } }
+
+    private fun enqueue(item: QueuedText) {
+        synchronized(outbox) { if (outbox.none { it.localId == item.localId }) outbox.add(item) }
+        persistOutbox()
+    }
+
+    private fun dropFromOutbox(localId: String) {
+        synchronized(outbox) { outbox.removeAll { it.localId == localId } }
+        persistOutbox()
+    }
+
+    /** Sends everything waiting (text, then in-session media), oldest first, stopping on the first network failure. */
+    fun flushOutbox() {
+        if (flushing) return
+        flushing = true
+        scope.launch {
+            try {
+                val pending = synchronized(outbox) { outbox.toList() }
+                for (q in pending) {
+                    setStatus(q.chatId, q.localId, "sending")
+                    val ok = runCatching { api.send(q.chatId, q.body, q.viewOnce, q.deleteAfter, q.silent, q.burn) }
+                        .onSuccess { sent -> dropFromOutbox(q.localId); replaceLocal(q.chatId, q.localId, sent) }
+                        .onFailure { e -> if (isRetryable(e)) { setStatus(q.chatId, q.localId, "queued"); return@launch } else { dropFromOutbox(q.localId); markFailed(q.chatId, q.localId) } }
+                        .isSuccess
+                    if (!ok) return@launch
+                }
+                // In-session media uploads that failed offline
+                for ((_, retry) in mediaRetries.toList()) runCatching { retry() }
+            } finally {
+                flushing = false
+            }
+        }
+    }
+
+    /** Re-shows queued messages for a chat (e.g. after its thread loads), so they aren't lost from view. */
+    private fun injectQueued(chatId: String) {
+        val mine = synchronized(outbox) { outbox.filter { it.chatId == chatId } }
+        if (mine.isEmpty()) return
+        updateThread(chatId) { s ->
+            val have = s.messages.mapTo(HashSet()) { it.messageId }
+            val add = mine.filter { it.localId !in have }
+                .map { Message(messageId = it.localId, direction = "outgoing", text = it.body, sentAt = it.sentAt, status = "queued", viewOnce = it.viewOnce, silent = it.silent) }
+            if (add.isEmpty()) s else s.copy(messages = (s.messages + add).sortedBy { it.sentAt })
+        }
     }
 
     fun retry(chatId: String, message: Message) {
+        dropFromOutbox(message.messageId)
+        mediaRetries.remove(message.messageId)
         if (message.text.startsWith(UPLOADING)) {
             updateThread(chatId) { s -> s.copy(messages = s.messages.filter { it.messageId != message.messageId }) }
             return
@@ -362,8 +480,11 @@ class ChatRepository(
         sendBody(chatId, message.text, message.viewOnce)
     }
 
-    fun discardFailed(chatId: String, message: Message) =
+    fun discardFailed(chatId: String, message: Message) {
+        dropFromOutbox(message.messageId)
+        mediaRetries.remove(message.messageId)
         updateThread(chatId) { s -> s.copy(messages = s.messages.filter { it.messageId != message.messageId }) }
+    }
 
     fun setTyping(chatId: String, typing: Boolean) = realtime.typing(chatId, typing)
 
@@ -470,6 +591,7 @@ class ChatRepository(
             "connect" -> {
                 refreshChats()
                 activeChatId?.let { openChat(it) }
+                flushOutbox()
             }
             "disconnect" -> _typing.value = emptyMap()
             "message:new" -> {

@@ -171,6 +171,7 @@ fun MessageBubble(
                             color = LocalContentColorAlpha(0.7f))
                         BubbleBody(message, content, outgoing, monitor, repository, callbacks, jumbo)
                         BubbleFooter(message, outgoing, monitor, onBubble = true)
+                        if (message.status == "queued") Text("🕓 Waiting for network…", fontSize = 11.sp, color = LocalContentColorAlpha(0.7f))
                         if (message.status == "failed") Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Not sent.", fontSize = 12.sp, color = PavaColors.Danger)
                             if (content !is MessageContent.Uploading) TextButton(onClick = { callbacks.onRetry(message) }) { Text("Retry", fontSize = 12.sp) }
@@ -229,7 +230,7 @@ private fun BubbleBody(
         is MessageContent.Audio -> VoiceNote(repository, content.fileId)
         is MessageContent.Document -> DocumentChip(repository, content)
         is MessageContent.Uploading -> Row(verticalAlignment = Alignment.CenterVertically) {
-            if (message.status != "failed") CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            if (message.status != "failed" && message.status != "queued") CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
             Spacer(Modifier.width(8.dp))
             Text(content.label, fontSize = 15.sp, maxLines = 2)
         }
@@ -274,6 +275,7 @@ fun TickIcon(status: String, modifier: Modifier = Modifier) {
     val base = LocalContentColorAlpha(0.6f)
     val (icon, tint) = when (status) {
         "sending" -> Icons.Filled.Schedule to base
+        "queued" -> Icons.Filled.Schedule to base
         "failed" -> Icons.Filled.ErrorOutline to PavaColors.Danger
         "read" -> Icons.Filled.DoneAll to PavaColors.ReadTick
         "delivered" -> Icons.Filled.DoneAll to base

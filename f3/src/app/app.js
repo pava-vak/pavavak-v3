@@ -73,6 +73,7 @@ function renderAuthenticatedView(user, chatState, peopleState, adminState, activ
           <div class="sidebar-topbar-actions">
             <span class="sidebar-conn-dot ${socketStatus}" title="${socketStatus}"></span>
             <button class="sidebar-icon-btn" data-role="new-group" title="New Group" aria-label="New group">👥</button>
+            <button class="sidebar-icon-btn" data-role="notes-to-self" title="Notes to self" aria-label="Notes to self">📝</button>
             <button class="sidebar-icon-btn" data-role="open-search" title="Search messages" aria-label="Search">🔍</button>
             <button class="sidebar-icon-btn" data-role="open-scheduled" title="Scheduled messages" aria-label="Scheduled messages">📅</button>
             <button class="sidebar-icon-btn" data-role="app-refresh" title="Check for update &amp; reload" aria-label="Refresh app">🔄</button>
@@ -261,6 +262,7 @@ function renderChatInfoPanel(activeChat, members = null, currentUserId = null) {
             📦 ${activeChat?.archived ? 'Unarchive' : 'Archive'}
           </button>
           <button class="cip-action-btn cip-action-danger" data-role="cip-clear">🗑 Clear Chat</button>
+          ${!isGroup && activeChat?.peerId ? `<button class="cip-action-btn cip-action-danger" data-role="cip-block" data-peer-id="${escapeHtml(String(activeChat.peerId))}">🚫 Block</button>` : ''}
           ${isGroup && !isGroupAdmin ? `<button class="cip-action-btn cip-action-danger" data-role="cip-leave-group">🚪 Leave Group</button>` : ''}
         </div>
       </div>
@@ -1582,7 +1584,14 @@ export function renderAppShell(root) {
         }
       }
       // ── New Group button ────────────────────────────────────────────────────
-      root.querySelector('[data-role="new-group"]')?.addEventListener('click', () => {
+root.querySelector('[data-role="notes-to-self"]')?.addEventListener('click', async () => {
+        try {
+          const { startSelfChat } = await import('../shared/apiClient.js');
+          const r = await startSelfChat();
+          if (r?.chat?.chatId) { await chatListStore.load(); openChat(r.chat.chatId); }
+        } catch (e) { showToast(e?.message || 'Could not open notes'); }
+      });
+            root.querySelector('[data-role="new-group"]')?.addEventListener('click', () => {
         groupModalOpen = true;
         groupModalState = { step: 'name', title: '', members: [], searchQuery: '', searchResults: [], loading: false, error: '' };
         render();
@@ -1732,6 +1741,22 @@ export function renderAppShell(root) {
             render();
           });
         });
+
+        const blockBtn = root.querySelector('[data-role="cip-block"]');
+        if (blockBtn) {
+          const peerId = blockBtn.dataset.peerId;
+          import('../shared/apiClient.js').then(({ fetchBlocks, setUserBlocked }) => {
+            fetchBlocks().then(r => { if ((r.blocked || []).includes(String(peerId))) blockBtn.textContent = '✅ Unblock'; }).catch(() => {});
+            blockBtn.addEventListener('click', async () => {
+              const blocking = !blockBtn.textContent.includes('Unblock');
+              try {
+                await setUserBlocked(peerId, blocking);
+                blockBtn.textContent = blocking ? '✅ Unblock' : '🚫 Block';
+                showToast(blocking ? 'Blocked' : 'Unblocked', 'success');
+              } catch (e) { showToast(e?.message || 'Could not update'); }
+            });
+          });
+        }
 
         root.querySelectorAll('[data-role="remove-member"]').forEach((btn) => {
           btn.addEventListener('click', () => {

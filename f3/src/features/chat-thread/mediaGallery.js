@@ -10,16 +10,17 @@ function formatGalleryDate(isoString) {
 const blobCache = new Map();
 const BLOB_CACHE_MAX = 60;
 
-async function loadBlob(fileId) {
-  if (blobCache.has(fileId)) return blobCache.get(fileId);
-  const blob = await requestMediaBlob(fileId);
+async function loadBlob(fileId, thumb = false) {
+  const key = thumb ? fileId + '#t' : fileId;
+  if (blobCache.has(key)) return blobCache.get(key);
+  const blob = await requestMediaBlob(fileId, { thumb });
   const url = URL.createObjectURL(blob);
   if (blobCache.size >= BLOB_CACHE_MAX) {
     const oldest = blobCache.keys().next().value;
     URL.revokeObjectURL(blobCache.get(oldest));
     blobCache.delete(oldest);
   }
-  blobCache.set(fileId, url);
+  blobCache.set(key, url);
   return url;
 }
 
@@ -434,7 +435,7 @@ export function openMediaGallery({ chatId, chatTitle, isAdmin = false }) {
 
         // Preload in background so thumb shows on return
         if (thumb.dataset.state === 'idle') {
-          loadBlob(fileId).then(url => {
+          loadBlob(fileId, true).then(url => {
             if (type === 'image') {
               thumb.style.backgroundImage = `url('${url}')`;
               thumb.innerHTML = '<span class="mg-thumb-veil"></span>';
@@ -473,8 +474,8 @@ export function openMediaGallery({ chatId, chatTitle, isAdmin = false }) {
       const thumb = cell.querySelector('.mg-thumb');
       if (thumb.dataset.state !== 'idle') return;
       const fileId = cell.dataset.mgFileid;
-      if (blobCache.has(fileId)) {
-        thumb.style.backgroundImage = `url('${blobCache.get(fileId)}')`;
+      if (blobCache.has(fileId + '#t')) {
+        thumb.style.backgroundImage = `url('${blobCache.get(fileId + '#t')}')`;
         thumb.innerHTML = '<span class="mg-thumb-veil"></span>';
         thumb.dataset.state = 'loaded';
         return;
@@ -482,7 +483,7 @@ export function openMediaGallery({ chatId, chatTitle, isAdmin = false }) {
       const obs = new IntersectionObserver(entries => {
         if (entries[0].isIntersecting) {
           obs.disconnect();
-          loadBlob(fileId).then(url => {
+          loadBlob(fileId, true).then(url => {
             thumb.style.backgroundImage = `url('${url}')`;
             thumb.innerHTML = '<span class="mg-thumb-veil"></span>';
             thumb.dataset.state = 'loaded';

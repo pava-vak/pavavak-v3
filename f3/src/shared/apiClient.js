@@ -40,9 +40,9 @@ export async function uploadVideoBlob(blob, mimeType) {
   return json;
 }
 
-export async function requestMediaBlob(fileId) {
+export async function requestMediaBlob(fileId, { thumb = false } = {}) {
   const { accessToken } = readTokens();
-  const url = `${config.apiBaseUrl}/api/v3/media/${encodeURIComponent(fileId)}`;
+  const url = `${config.apiBaseUrl}/api/v3/media/${encodeURIComponent(fileId)}${thumb ? '?thumb=1' : ''}`;
   const response = await fetch(url, {
     credentials: 'include',
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
@@ -208,6 +208,30 @@ export async function sendMessage(input) {
     method: 'POST',
     body: JSON.stringify(input)
   });
+}
+
+export async function fetchBlocks() {
+  return request('/api/v3/blocks');
+}
+
+export async function setUserBlocked(userId, blocked) {
+  return request(`/api/v3/users/${encodeURIComponent(userId)}/block`, { method: 'PUT', body: JSON.stringify({ blocked }) });
+}
+
+export async function startSelfChat() {
+  return request('/api/v3/chats/self', { method: 'POST' });
+}
+
+export async function deleteMessageForMe(messageId) {
+  return request(`/api/v3/messages/${encodeURIComponent(messageId)}/for-me`, { method: 'DELETE' });
+}
+
+export async function fetchEditHistory(messageId) {
+  return request(`/api/v3/messages/${encodeURIComponent(messageId)}/history`);
+}
+
+export async function sendWhenOnline(chatId, text) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/send-when-online`, { method: 'POST', body: JSON.stringify({ text }) });
 }
 
 export async function fetchHiddenChats() {

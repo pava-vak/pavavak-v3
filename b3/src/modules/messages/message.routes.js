@@ -7,6 +7,7 @@ const { sendFcmToUser } = require('../notifications/fcm.service');
 const { getPool } = require('../../db/pool');
 const { canAccessFile, fileIdFromBody } = require('../media/mediaAccess');
 const { BURN_SECONDS } = require('../privacy/privacy');
+const { isBlockedInChat } = require('../features/extras');
 
 const DELETE_AFTER_DURATIONS = {
   '1h': 60 * 60 * 1000,
@@ -102,6 +103,9 @@ function registerMessageRoutes(app) {
       const attachedFileId = fileIdFromBody(parsed.data.text);
       if (attachedFileId && !(await canAccessFile(request.auth.userId, attachedFileId))) {
         return reply.status(403).send({ success: false, error: 'You can only send files you uploaded or received' });
+      }
+      if (await isBlockedInChat(getPool(), request.auth.userId, parsed.data.chatId)) {
+        return reply.status(403).send({ success: false, error: 'You cannot message this contact' });
       }
 
       const expiresAt = parsed.data.deleteAfter !== 'never'

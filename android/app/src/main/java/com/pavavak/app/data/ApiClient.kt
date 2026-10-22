@@ -138,6 +138,24 @@ class ApiClient(private val store: SecureStore) {
         (api(execute("GET", "/api/v3/me/privacy"))["ghostMode"] as? JsonPrimitive)?.content == "true"
     suspend fun setGhostMode(on: Boolean) = execute("PUT", "/api/v3/me/privacy", obj("ghostMode" to on).toString())
 
+    suspend fun blockedUsers(): List<String> =
+        ((api(execute("GET", "/api/v3/blocks"))["blocked"] as? JsonArray).orEmpty()).mapNotNull { (it as? JsonPrimitive)?.content }
+    suspend fun setBlocked(userId: Long, blocked: Boolean) =
+        execute("PUT", "/api/v3/users/$userId/block", obj("blocked" to blocked).toString())
+
+    suspend fun deleteForMe(messageId: String) = execute("DELETE", "/api/v3/messages/${enc(messageId)}/for-me")
+
+    suspend fun editHistory(messageId: String): List<EditVersion> =
+        decode<EditHistoryResponse>(execute("GET", "/api/v3/messages/${enc(messageId)}/history")).edits
+
+    suspend fun startSelfChat(): ChatSummary =
+        decode<DirectChatResponse>(execute("POST", "/api/v3/chats/self", "{}")).chat
+
+    suspend fun sendWhenOnline(chatId: String, text: String) =
+        execute("POST", "/api/v3/chats/${enc(chatId)}/send-when-online", obj("text" to text).toString())
+    suspend fun onlineQueue(): List<ScheduledItem> = decode<ScheduledResponse>(execute("GET", "/api/v3/online-queue")).items
+    suspend fun cancelOnlineQueue(id: String) = execute("DELETE", "/api/v3/online-queue/${enc(id)}")
+
     // ── People ──────────────────────────────────────────────────────────────
 
     suspend fun searchUsers(query: String): List<UserSearchResult> =

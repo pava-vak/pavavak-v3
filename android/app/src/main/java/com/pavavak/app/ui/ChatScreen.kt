@@ -122,6 +122,8 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
     var editing by remember { mutableStateOf<Message?>(null) }
     var forwarding by remember { mutableStateOf<Message?>(null) }
     var confirmDelete by remember { mutableStateOf<Message?>(null) }
+    var confirmDeleteForMe by remember { mutableStateOf<Message?>(null) }
+    var historyFor by remember { mutableStateOf<Message?>(null) }
     var schedulingText by remember { mutableStateOf<String?>(null) }
     var creatingPoll by remember { mutableStateOf(false) }
     var searchOpen by remember { mutableStateOf(false) }
@@ -251,6 +253,13 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
             onSendVoice = { file, o -> repository.sendMedia(chatId, "Sending voice note…", false, o.deleteAfter, o.silent, o.burn) { "__AUD__:" + repository.media.uploadVoice(file) } },
             onTyping = { repository.setTyping(chatId, it) },
             onSchedule = { schedulingText = it },
+            onSendWhenOnline = { text ->
+                scope.launch {
+                    runCatching { repository.api.sendWhenOnline(chatId, text) }
+                        .onSuccess { context.toast("Will send when ${chat?.displayTitle ?: "they"} are online") }
+                        .onFailure { context.toast(it.message ?: "Couldn't queue") }
+                }
+            },
             onPoll = { creatingPoll = true },
         )
     }
@@ -285,6 +294,8 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
                             }
                         }.onSuccess { if (it != null) context.toast("Saved to $it") }.onFailure { context.toast(it.message ?: "Couldn't save") }
                     }
+                    MessageAction.History -> historyFor = m
+                    MessageAction.DeleteForMe -> confirmDeleteForMe = m
                     MessageAction.Delete -> confirmDelete = m
                 }
             },
@@ -309,6 +320,12 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
             onConfirm = { scope.launch { runCatching { repository.delete(chatId, m.messageId) }.onFailure { context.toast(it.message ?: "Couldn't delete") } } },
             onDismiss = { confirmDelete = null })
     }
+    confirmDeleteForMe?.let { m ->
+        ConfirmDialog("Delete for me?", "This removes the message from your view only. ${chat?.displayTitle ?: "The other person"} will still see it.", "Delete for me", destructive = true,
+            onConfirm = { scope.launch { runCatching { repository.deleteForMe(chatId, m.messageId) }.onFailure { context.toast(it.message ?: "Couldn't delete") } } },
+            onDismiss = { confirmDeleteForMe = null })
+    }
+    historyFor?.let { m -> EditHistoryDialog(repository, m) { historyFor = null } }
     schedulingText?.let { text ->
         ScheduleDialog(
             onSchedule = { at -> scope.launch {

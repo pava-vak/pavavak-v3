@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.EventNote
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -88,6 +89,7 @@ fun ChatListScreen(
     onBack: () -> Unit,
     onSearch: () -> Unit,
     onStarred: () -> Unit,
+    onNotesToSelf: () -> Unit,
     onScheduled: () -> Unit,
     onSettings: () -> Unit,
     onAdmin: () -> Unit,
@@ -130,6 +132,8 @@ fun ChatListScreen(
                         IconButton(onClick = onSearch) { Icon(Icons.Filled.Search, "Search messages") }
                         IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, "Menu") }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(text = { Text("Notes to self") }, leadingIcon = { Icon(Icons.Filled.EventNote, null) },
+                                onClick = { menuOpen = false; onNotesToSelf() })
                             DropdownMenuItem(text = { Text("Starred messages") }, leadingIcon = { Icon(Icons.Filled.Star, null) },
                                 onClick = { menuOpen = false; onStarred() })
                             DropdownMenuItem(text = { Text("Scheduled messages") }, leadingIcon = { Icon(Icons.Filled.Schedule, null) },

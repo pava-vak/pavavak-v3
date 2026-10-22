@@ -62,17 +62,56 @@ class PushManager(private val context: Context, private val api: ApiClient) {
 }
 
 object Notifier {
-    private const val CHANNEL = "messages"
+    // Real messages: content hidden on the lock screen. Disguised notices: shown in full, because the
+    // content is already fake and showing it completes the disguise.
+    private const val CHANNEL_MSG = "messages"
+    private const val CHANNEL_DISGUISE = "alerts"
     const val EXTRA_CHAT_ID = "open_chat_id"
+
+    // When a disguise icon is on, all alerts collapse into this one id so they look like a single
+    // app notice (e.g. one weather update) instead of a stack of identical messages.
+    private const val DISGUISE_ID = 7_314_000
+    private val DISGUISE_ICONS = setOf("weather", "clock", "notes", "calculator")
+
+    /**
+     * For a disguise icon, a plausible generic notice under that app's name — never "new message".
+     * Labels are generic category words, not any real product. Returns null for the real icon.
+     */
+    private fun disguiseNotice(iconId: String): Pair<String, String>? {
+        if (iconId !in DISGUISE_ICONS) return null
+        val (title, lines) = when (iconId) {
+            "weather" -> "Weather" to listOf(
+                "Partly cloudy · 26°C", "Light rain expected this evening", "Air quality is moderate today",
+                "UV index high this afternoon", "Clear skies tonight", "Chance of showers around 5 PM",
+            )
+            "clock" -> "Clock" to listOf(
+                "Alarm set for 7:00 AM", "Bedtime reminder", "Timer finished", "Upcoming alarm in 8 hours",
+            )
+            "notes" -> "Notes" to listOf(
+                "You have an unsaved note", "Note backup completed", "Reminder: review your list", "1 note needs syncing",
+            )
+            "calculator" -> "Calculator" to listOf(
+                "Calculation history saved", "Backup available", "Tap to resume",
+            )
+            else -> return null
+        }
+        return title to lines.random()
+    }
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
-        if (manager.getNotificationChannel(CHANNEL) != null) return
+        // Neutral channel names so the system settings list doesn't reveal a chat app
         manager.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "New messages"
+            NotificationChannel(CHANNEL_MSG, "Updates", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "General updates"
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+            },
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_DISGUISE, "Alerts", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "App alerts"
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             },
         )
     }
@@ -94,28 +133,40 @@ object Notifier {
         if (cached?.muted == true) return
 
         ensureChannel(app)
-        val title = if (lock.isConfigured()) settings.lockName else cached?.title ?: settings.lockName
+        val disguise = disguiseNotice(settings.appIcon)
+        // Disguised alerts share one id (look like one app notice); real alerts are one per chat
+        val notifId = if (disguise != null) DISGUISE_ID else chatId.hashCode()
+        val title = disguise?.first
+            ?: if (lock.isConfigured()) settings.lockName else cached?.title ?: settings.lockName
+        val text = disguise?.second ?: "New message"
+
         val open = Intent(app, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(EXTRA_CHAT_ID, chatId)
-        val pending = PendingIntent.getActivity(app, chatId.hashCode(), open,
+        val pending = PendingIntent.getActivity(app, notifId, open,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
 
-        val notification = NotificationCompat.Builder(app, CHANNEL)
+        val notification = NotificationCompat.Builder(app, if (disguise != null) CHANNEL_DISGUISE else CHANNEL_MSG)
             .setSmallIcon(AppIcons.notificationIcon(settings.appIcon))
             .setContentTitle(title)
-            .setContentText("New message")
+            .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            // A disguised notice should not be grouped/categorised as a message
+            .setCategory(if (disguise != null) NotificationCompat.CATEGORY_RECOMMENDATION else NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(if (disguise != null) NotificationCompat.VISIBILITY_PUBLIC else NotificationCompat.VISIBILITY_PRIVATE)
             .setAutoCancel(true)
             .setOnlyAlertOnce(false)
             .setContentIntent(pending)
             .build()
-        runCatching { NotificationManagerCompat.from(app).notify(chatId.hashCode(), notification) }
+        runCatching { NotificationManagerCompat.from(app).notify(notifId, notification) }
     }
 
-    fun cancel(context: Context, chatId: String) = runCatching { NotificationManagerCompat.from(context).cancel(chatId.hashCode()) }
+    /** Clears the alert for [chatId] — or the shared disguised alert when a disguise icon is on. */
+    fun cancel(context: Context, chatId: String) = runCatching {
+        val iconId = (context.applicationContext as? PavaApplication)?.settings?.current?.appIcon ?: "default"
+        val id = if (iconId in DISGUISE_ICONS) DISGUISE_ID else chatId.hashCode()
+        NotificationManagerCompat.from(context).cancel(id)
+    }
 
     fun cancelAll(context: Context) = runCatching { NotificationManagerCompat.from(context).cancelAll() }
 }

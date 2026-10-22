@@ -51,8 +51,11 @@ function attachSocketServer(httpServer) {
     const user = socket.data.user;
     const userRoom = `user:${user.userId}`;
 
+    const firstConnection = !isUserOnline(user.userId);
     addConnection(user.userId, socket.id);
     socket.join(userRoom);
+    // They just came online: deliver anything queued "send when online" for them
+    if (firstConnection) require('../modules/features/extras').flushOnlineQueueFor(user.userId).catch(() => {});
 
     // Cache the set of chat IDs this socket is allowed in — used for O(1) typing auth
     socket.data.chatIdSet = new Set();

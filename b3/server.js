@@ -21,6 +21,7 @@ async function start() {
 
   await normalizedChat.ensureClearedColumn();
   await privacy.ensureColumns();
+  await require('./src/modules/features/extras').ensureTables();
   await require('./src/modules/notifications/fcm.service').ensureTable();
   await mediaAccess.ensureTable();
   const port = env.PORT;

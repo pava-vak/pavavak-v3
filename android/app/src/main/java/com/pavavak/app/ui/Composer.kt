@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.WifiTethering
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
@@ -133,6 +134,7 @@ fun Composer(
     onSendVoice: (File, ComposerOptions) -> Unit,
     onTyping: (Boolean) -> Unit,
     onSchedule: (String) -> Unit,
+    onSendWhenOnline: (String) -> Unit,
     onPoll: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -276,6 +278,10 @@ fun Composer(
                     AttachTile(Icons.Filled.Schedule, "Schedule", Color(0xFF6366F1)) {
                         showAttach = false
                         if (text.isBlank()) context.toast("Type the message first, then schedule it") else onSchedule(text.also { text = ""; onDraftChange("") })
+                    }
+                    AttachTile(Icons.Filled.WifiTethering, "When online", Color(0xFF0EA5E9)) {
+                        showAttach = false
+                        if (text.isBlank()) context.toast("Type the message first") else onSendWhenOnline(text.also { text = ""; onDraftChange("") })
                     }
                     AttachTile(Icons.Filled.Poll, "Poll", Color(0xFF10B981)) { showAttach = false; onPoll() }
                 }

@@ -26,6 +26,8 @@ import androidx.compose.material.icons.automirrored.filled.Forward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PushPin
@@ -66,7 +68,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
 
-enum class MessageAction { Reply, Copy, Edit, Forward, Pin, Unpin, Star, Save, Delete }
+enum class MessageAction { Reply, Copy, Edit, Forward, Pin, Unpin, Star, Save, History, DeleteForMe, Delete }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -104,7 +106,9 @@ fun MessageActionSheet(
             if (!restricted) SheetAction(Icons.Filled.Star, "Star") { onAction(MessageAction.Star) }
             if (!restricted && (content is MessageContent.Image || content is MessageContent.Video || content is MessageContent.Document))
                 SheetAction(Icons.Filled.Download, "Save to phone") { onAction(MessageAction.Save) }
-            if (message.isOutgoing && !message.deleted) SheetAction(Icons.Filled.DeleteOutline, "Delete for everyone", destructive = true) {
+            if (isText && message.edited && !restricted) SheetAction(Icons.Filled.History, "Edit history") { onAction(MessageAction.History) }
+            if (!message.isLocal) SheetAction(Icons.Filled.DeleteOutline, "Delete for me", destructive = true) { onAction(MessageAction.DeleteForMe) }
+            if (message.isOutgoing && !message.deleted && !message.isLocal) SheetAction(Icons.Filled.DeleteSweep, "Delete for everyone", destructive = true) {
                 onAction(MessageAction.Delete)
             }
         }
@@ -235,4 +239,40 @@ fun PinnedBanner(text: String?, onTap: () -> Unit, onUnpin: (() -> Unit)?) {
             }
         }
     }
+}
+
+/** Shows a message's previous versions (newest change last). */
+@Composable
+fun EditHistoryDialog(repository: com.pavavak.app.data.ChatRepository, message: com.pavavak.app.data.Message, onDismiss: () -> Unit) {
+    var versions by androidx.compose.runtime.remember { mutableStateOf<List<com.pavavak.app.data.EditVersion>?>(null) }
+    var error by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(message.messageId) {
+        runCatching { repository.api.editHistory(message.messageId) }
+            .onSuccess { versions = it }.onFailure { error = it.message ?: "Couldn't load history" }
+    }
+    val current = (message.content as? com.pavavak.app.data.MessageContent.Text)?.text ?: message.text
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit history") },
+        text = {
+            when {
+                error != null -> Text(error!!, color = PavaColors.Danger)
+                versions == null -> Text("Loading…", color = PavaColors.TextMuted)
+                else -> Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
+                    versions!!.forEach { v ->
+                        Column {
+                            Text(v.text, color = PavaColors.TextMuted)
+                            Text(formatDateTime(v.editedAt), fontSize = 11.sp, color = PavaColors.TextMuted)
+                        }
+                        androidx.compose.material3.HorizontalDivider(color = PavaColors.Outline)
+                    }
+                    Column {
+                        Text(current, color = PavaColors.TextPrimary)
+                        Text("Current" + (message.editedAt?.let { " · ${formatDateTime(it)}" } ?: ""), fontSize = 11.sp, color = PavaColors.Accent)
+                    }
+                }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Close") } },
+    )
 }

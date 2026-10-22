@@ -144,7 +144,8 @@ function registerMediaRoutes(app) {
           .resize(THUMB_MAX_PX, THUMB_MAX_PX, { fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 75 })
           .toBuffer();
-        thumbId = `${crypto.randomUUID()}_thumb.webp`;
+        // Named from the main file's uuid so "GET /media/:fileId?thumb=1" can find it
+        thumbId = `${fileId.replace(/\.[^.]+$/, '')}.thumb.webp`;
         await fs.promises.writeFile(path.join(UPLOADS_DIR, thumbId), thumbBuffer);
       } catch {
         thumbId = null;
@@ -233,6 +234,20 @@ function registerMediaRoutes(app) {
 
     if (!request.auth.isAdmin && !(await canAccessFile(request.auth.userId, fileId))) {
       return reply.status(403).send({ success: false, error: 'Access denied' });
+    }
+
+    // Low-detail thumbnail for the blurred inline preview (so the sharp image never reaches the device there)
+    if (request.query?.thumb) {
+      const thumbPath = path.join(UPLOADS_DIR, `${fileId.replace(/\.[^.]+$/, '')}.thumb.webp`);
+      try {
+        const tstat = await fs.promises.stat(thumbPath);
+        return reply
+          .header('Content-Type', 'image/webp')
+          .header('Content-Length', String(tstat.size))
+          .header('Cache-Control', 'private, max-age=86400')
+          .header('X-Content-Type-Options', 'nosniff')
+          .send(fs.createReadStream(thumbPath));
+      } catch { /* no thumb (e.g. gif/old upload): fall through to the full file */ }
     }
 
     const filePath = path.join(UPLOADS_DIR, fileId);
