@@ -37,7 +37,18 @@ async function login(app, userId = 9001, isAdmin = true) {
   });
 
   assert.equal(response.statusCode, 200);
-  return response.json();
+  return { ...response.json(), refreshCookie: refreshCookieFrom(response) };
+}
+
+// The refresh token is only ever sent as the HttpOnly pava_refresh cookie
+function refreshCookieFrom(response) {
+  const cookies = [].concat(response.headers['set-cookie'] || []);
+  const hit = cookies.find((c) => c.startsWith('pava_refresh='));
+  return hit ? hit.split(';')[0] : '';
+}
+
+function refresh(app, cookie) {
+  return app.inject({ method: 'POST', url: '/api/v3/auth/refresh', headers: { cookie } });
 }
 
 function authHeaders(accessToken) {
@@ -50,13 +61,7 @@ test('refresh token flow returns complete user identity', async () => {
   await withApp(async (app) => {
     const session = await login(app, 9101);
 
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/v3/auth/refresh',
-      payload: {
-        refreshToken: session.tokens.refreshToken
-      }
-    });
+    const response = await refresh(app, session.refreshCookie);
 
     assert.equal(response.statusCode, 200);
     const body = response.json();
@@ -66,7 +71,8 @@ test('refresh token flow returns complete user identity', async () => {
     assert.equal(body.user.displayName, 'Test User 9101');
     assert.equal(body.user.isAdmin, true);
     assert.ok(body.tokens.accessToken);
-    assert.ok(body.tokens.refreshToken);
+    assert.equal(body.tokens.refreshToken, undefined, 'refresh token must never be in the JSON body');
+    assert.ok(refreshCookieFrom(response), 'a rotated refresh cookie is issued');
   });
 });
 
@@ -78,26 +84,14 @@ test('refresh reloads user state and rejects disabled users', async () => {
       isAdmin: false
     });
 
-    const refreshed = await app.inject({
-      method: 'POST',
-      url: '/api/v3/auth/refresh',
-      payload: {
-        refreshToken: session.tokens.refreshToken
-      }
-    });
+    const refreshed = await refresh(app, session.refreshCookie);
 
     assert.equal(refreshed.statusCode, 200);
     assert.equal(refreshed.json().user.displayName, 'Renamed User');
     assert.equal(refreshed.json().user.isAdmin, false);
 
     await demoIdentity.setUserPatch(9111, { disabled: true });
-    const disabled = await app.inject({
-      method: 'POST',
-      url: '/api/v3/auth/refresh',
-      payload: {
-        refreshToken: refreshed.json().tokens.refreshToken
-      }
-    });
+    const disabled = await refresh(app, refreshCookieFrom(refreshed));
 
     assert.equal(disabled.statusCode, 401);
   });
@@ -106,6 +100,8 @@ test('refresh reloads user state and rejects disabled users', async () => {
 test('logout revokes previously issued refresh tokens', async () => {
   await withApp(async (app) => {
     const session = await login(app, 9121);
+    // The cookie works before logout, so the 401 below really comes from the revocation
+    assert.equal((await refresh(app, session.refreshCookie)).statusCode, 200);
 
     const logout = await app.inject({
       method: 'POST',
@@ -114,14 +110,8 @@ test('logout revokes previously issued refresh tokens', async () => {
     });
     assert.equal(logout.statusCode, 200);
 
-    const refresh = await app.inject({
-      method: 'POST',
-      url: '/api/v3/auth/refresh',
-      payload: {
-        refreshToken: session.tokens.refreshToken
-      }
-    });
-    assert.equal(refresh.statusCode, 401);
+    const afterLogout = await refresh(app, session.refreshCookie);
+    assert.equal(afterLogout.statusCode, 401);
   });
 });
 

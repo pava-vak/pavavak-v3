@@ -35,6 +35,20 @@ docker run -d --name pava-db --restart unless-stopped \
 
 The data volume is the unnamed one above. Never `docker rm -v` the container and never prune volumes.
 
+## Real client IPs
+
+nginx (`/etc/nginx/sites-available/pava-vak`) sets `X-Forwarded-For $remote_addr` on `/api/` and `/socket.io/`
+(overwriting anything the client sent), and the backend trusts only the local proxy (`trustProxy: '127.0.0.1'`).
+So `request.ip` is the real visitor: login throttling and rate limits are per visitor, and logs show real IPs.
+Keep only the symlink in `sites-enabled`; nginx loads every file there, so never leave `.bak` copies in it.
+
+## Web folder layout
+
+`/var/www/pava-vak` should contain only `b3/`, `f3/` and `downloads/`. Strays found on 2026-10-22 (an old web
+build, a repo checkout, `b3.bak.20261014…` with an old `.env`, and a folder named `*` full of Windows system files
+from a bad upload) were archived to `/root/pava-www-strays_20261022_015446.tar.gz` (the Windows files deleted).
+Deploy backups in `/root` are trimmed to the 2 newest of each kind.
+
 ## Secrets (on the server, mode 600, outside git and outside web roots)
 
 - `/var/www/pava-vak/b3/.env`: backend settings (DB URL, JWT keys, VAPID, recovery token…)

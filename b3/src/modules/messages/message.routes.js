@@ -139,7 +139,8 @@ function registerMessageRoutes(app) {
       let mutedUserIds = new Set();
       try {
         const { rows: mutedRows } = await getPool().query(
-          'select user_id from v3_conversation_members where conversation_id=$1 and muted=true',
+          // Muted and hidden chats never notify (web push or Android)
+          'select user_id from v3_conversation_members where conversation_id=$1 and (muted = true or hidden = true)',
           [parsed.data.chatId]
         );
         // bigint arrives as a string; member ids are numbers

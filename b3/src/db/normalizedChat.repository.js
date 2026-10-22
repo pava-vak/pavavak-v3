@@ -725,9 +725,17 @@ async function adminListMessagesForChat(chatId, cursor = null, limit = 50) {
          msg.view_once,
          msg.expires_at,
          msg.edited_at,
+         msg.silent,
+         msg.burn_seconds,
+         p.question as poll_question,
+         p.options as poll_options,
+         (select json_object_agg(t.option_index::text, t.cnt)
+            from (select option_index, count(*) as cnt from v3_poll_votes
+                  where message_id = msg.message_id group by option_index) t) as poll_votes,
          msg.created_at as sent_at
        from v3_messages msg
        left join v3_users u on u.user_id = msg.sender_id
+       left join v3_polls p on p.message_id = msg.message_id
        where msg.conversation_id = $1 ${cursorClause}
        order by msg.created_at desc, msg.message_id desc
        limit $2
@@ -751,7 +759,15 @@ async function adminListMessagesForChat(chatId, cursor = null, limit = 50) {
     deletedAt: row.deleted_at?.toISOString?.() || row.deleted_at || null,
     viewOnce: Boolean(row.view_once),
     expiresAt: row.expires_at?.toISOString?.() || row.expires_at || null,
-    edited: Boolean(row.edited_at)
+    edited: Boolean(row.edited_at),
+    silent: Boolean(row.silent),
+    burnSeconds: row.burn_seconds != null ? Number(row.burn_seconds) : null,
+    poll: row.poll_question ? {
+      question: row.poll_question,
+      options: Array.isArray(row.poll_options) ? row.poll_options : JSON.parse(row.poll_options || '[]'),
+      votes: row.poll_votes || {},
+      myVote: null
+    } : undefined
   }));
 
   return {

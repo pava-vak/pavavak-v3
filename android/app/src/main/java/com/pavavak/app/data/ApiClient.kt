@@ -128,6 +128,12 @@ class ApiClient(private val store: SecureStore) {
     suspend fun registerFcmToken(token: String) = execute("POST", "/api/v3/push/fcm-token", obj("token" to token).toString())
     suspend fun unregisterFcmToken(token: String) = execute("DELETE", "/api/v3/push/fcm-token", obj("token" to token).toString())
 
+    suspend fun hiddenChats(): List<String> =
+        ((api(execute("GET", "/api/v3/me/hidden-chats"))["chatIds"] as? JsonArray).orEmpty())
+            .mapNotNull { (it as? JsonPrimitive)?.content }
+    suspend fun setChatHidden(chatId: String, hidden: Boolean) =
+        execute("PUT", "/api/v3/chats/${enc(chatId)}/hidden", obj("hidden" to hidden).toString())
+
     suspend fun ghostMode(): Boolean =
         (api(execute("GET", "/api/v3/me/privacy"))["ghostMode"] as? JsonPrimitive)?.content == "true"
     suspend fun setGhostMode(on: Boolean) = execute("PUT", "/api/v3/me/privacy", obj("ghostMode" to on).toString())

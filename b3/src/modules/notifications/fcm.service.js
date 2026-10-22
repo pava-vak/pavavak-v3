@@ -98,7 +98,7 @@ async function sendToToken(token, data) {
   if (res.ok) return true;
   const body = await res.text().catch(() => '');
   // Uninstalled app or rotated token: forget it
-  if (res.status === 404 || body.includes('UNREGISTERED')) {
+  if (res.status === 404 || body.includes('UNREGISTERED') || body.includes('not a valid FCM registration token')) {
     await getPool().query('delete from v3_fcm_tokens where token = $1', [token]).catch(() => {});
   } else {
     console.error('[fcm] send failed', res.status, body.slice(0, 200));

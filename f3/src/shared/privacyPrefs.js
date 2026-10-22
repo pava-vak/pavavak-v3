@@ -1,4 +1,5 @@
-// Device-only privacy settings: hidden chats live in this browser and are never sent to the server.
+// Hidden chats: cached in this browser and synced with the server (per member, so the other person
+// never sees it). The server uses it to skip notifications; every device shows the same hidden list.
 import { escapeHtml } from './html.js';
 import { hasEnrolledLocally, hasPin, isEnabled, verify, verifyPin } from './biometricLock.js';
 
@@ -13,11 +14,35 @@ export function getHiddenChats(userId) {
   }
 }
 
+function storeHidden(userId, set) {
+  try { localStorage.setItem(hiddenKey(userId), JSON.stringify([...set])); } catch { /* storage full or blocked */ }
+}
+
 export function setChatHidden(userId, chatId, hidden) {
   const next = getHiddenChats(userId);
   if (hidden) next.add(chatId); else next.delete(chatId);
-  try { localStorage.setItem(hiddenKey(userId), JSON.stringify([...next])); } catch { /* storage full or blocked */ }
+  storeHidden(userId, next);
+  import('./apiClient.js').then(({ setChatHiddenRemote }) => setChatHiddenRemote(chatId, hidden)).catch(() => {});
   return next;
+}
+
+/**
+ * Server list wins, except on this browser's first sync: chats hidden here before syncing
+ * existed are uploaded so nothing reappears.
+ */
+export async function syncHiddenChats(userId) {
+  const { fetchHiddenChats, setChatHiddenRemote } = await import('./apiClient.js');
+  const res = await fetchHiddenChats();
+  const result = new Set(res?.chatIds || []);
+  const syncedKey = `pava-hidden-synced-${userId}`;
+  if (localStorage.getItem(syncedKey) !== '1') {
+    for (const id of getHiddenChats(userId)) {
+      if (!result.has(id)) { await setChatHiddenRemote(id, true).catch(() => {}); result.add(id); }
+    }
+    try { localStorage.setItem(syncedKey, '1'); } catch { /* ignore */ }
+  }
+  storeHidden(userId, result);
+  return result;
 }
 
 /**
@@ -73,7 +98,7 @@ export function renderHiddenChatsModal(chats) {
     <div class="privacy-pin-overlay" data-role="hidden-chats-overlay">
       <div class="privacy-pin-card hidden-chats-card">
         <h3>Hidden chats</h3>
-        <p>Only on this browser. Hidden chats don't appear in your list or make a sound.</p>
+        <p>Hidden on all your devices. They don't appear in your list, make a sound or send notifications.</p>
         ${chats.length ? `<ul class="hidden-chats-list">
           ${chats.map((c) => `
             <li>

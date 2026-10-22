@@ -1,4 +1,17 @@
-import { escapeHtml } from '../shared/html.js';
+import { escapeHtml, formatMessagePreview } from '../shared/html.js';
+
+// Readable text for monitoring: media markers become labels, polls show question and votes
+function monitorText(m) {
+  if (m.poll) {
+    const total = Object.values(m.poll.votes || {}).reduce((a, b) => a + Number(b), 0);
+    const options = (m.poll.options || []).map((o, i) => `${o} (${m.poll.votes?.[i] || 0})`).join(' · ');
+    return `📊 ${m.poll.question} — ${options} — ${total} vote${total === 1 ? '' : 's'}`;
+  }
+  const flags = [m.viewOnce ? '👁 view once' : '', m.burnSeconds != null ? '🔥 burn after reading' : '', m.silent ? '🔕 silent' : '', m.deletedAt ? '🚫 deleted' : '']
+    .filter(Boolean).join(' · ');
+  const text = (m.text || '').startsWith('__') ? formatMessagePreview(m.text) : (m.text || '');
+  return flags ? `${text}  [${flags}]` : text;
+}
 import { createAdminPanelStore } from './adminPanelStore.js';
 
 function formatTime(iso) {
@@ -177,7 +190,7 @@ function renderMonitorMessages(state) {
         ${monitorMessages.map((m) => `
           <div class="ap-monitor-msg">
             <span class="ap-monitor-sender">${escapeHtml(m.senderDisplayName || m.senderName || '?')}</span>
-            <span class="ap-monitor-text">${escapeHtml(m.text || '')}</span>
+            <span class="ap-monitor-text">${escapeHtml(monitorText(m))}</span>
             <span class="ap-monitor-time">${formatTime(m.sentAt || m.createdAt)}</span>
           </div>
         `).join('')}

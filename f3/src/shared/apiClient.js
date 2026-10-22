@@ -210,6 +210,14 @@ export async function sendMessage(input) {
   });
 }
 
+export async function fetchHiddenChats() {
+  return request('/api/v3/me/hidden-chats');
+}
+
+export async function setChatHiddenRemote(chatId, hidden) {
+  return request(`/api/v3/chats/${encodeURIComponent(chatId)}/hidden`, { method: 'PUT', body: JSON.stringify({ hidden }) });
+}
+
 export async function getPrivacy() {
   return request('/api/v3/me/privacy');
 }

@@ -94,7 +94,7 @@ export function renderSettingsModal(user = {}, biometricEnrolled = false) {
               <span>👻 Ghost mode</span>
               <button class="settings-lock-btn settings-lock-btn--off" data-role="ghost-toggle" disabled>…</button>
             </div>
-            <p class="settings-section-sub" style="margin-top:12px">Hidden chats stay on this browser only and need your PIN or fingerprint to view.</p>
+            <p class="settings-section-sub" style="margin-top:12px">Hidden chats are hidden on all your devices (never on the other person's) and need your PIN or fingerprint to view.</p>
             <button class="secondary-button" style="margin-top:8px" data-role="view-hidden-chats">🙈 Hidden chats</button>
           </section>
 

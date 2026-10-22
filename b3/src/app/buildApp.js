@@ -23,6 +23,9 @@ const biometricRepo = require('../modules/biometric/biometric.repository');
 function buildApp() {
   const app = Fastify({
     logger: { level: env.LOG_LEVEL },
+    // nginx on the same host sets X-Forwarded-For to the real client; trust only that hop so
+    // request.ip is the visitor (login throttling, rate limits, logs) and can't be spoofed
+    trustProxy: '127.0.0.1',
     bodyLimit: 6 * 1024 * 1024  // 6 MB — covers base64-encoded images up to ~4.5 MB
   });
 

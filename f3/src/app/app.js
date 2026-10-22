@@ -13,7 +13,7 @@ import { renderSettingsModal, bindSettingsModal } from '../features/settings/set
 import { renderOnboarding, requestPermissions } from '../features/onboarding/onboardingView.js';
 import { isEnabled as isLockEnabled, disable as disableLock, setPin, verifyPin, hasPin, clearPin, getLockTimer, setLockTimer, isSupported as isBiometricSupported, isPlatformAvailable, hasEnrolledLocally, checkEnrolled, enroll, verify, revoke as revokeBiometric } from '../shared/biometricLock.js';
 import { playMessageTone } from '../shared/notificationSound.js';
-import { bindHiddenChatsModal, getHiddenChats, renderHiddenChatsModal, setChatHidden, verifyOwner } from '../shared/privacyPrefs.js';
+import { bindHiddenChatsModal, getHiddenChats, renderHiddenChatsModal, setChatHidden, syncHiddenChats, verifyOwner } from '../shared/privacyPrefs.js';
 
 // Chats hidden on this browser; refreshed on every render from localStorage
 let hiddenChatIds = new Set();
@@ -449,6 +449,7 @@ export function renderAppShell(root) {
   let groupModalState = { step: 'name', title: '', members: [], searchQuery: '', searchResults: [], loading: false, error: '' };
   let addUserModalOpen = false;
   let hiddenModalOpen = false;
+  let hiddenSyncedFor = null;
   let chatInfoOpen = false;
   let chatInfoMembers = null;
   let mobileTab = 'chats';
@@ -1252,6 +1253,11 @@ export function renderAppShell(root) {
     if (sessionState.status === 'authenticated' && sessionState.user) {
       const { viewOnce, deleteAfter } = chatThreadStore.getState();
       hiddenChatIds = getHiddenChats(sessionState.user.userId);
+      // Once per signed-in user per page load: pull hidden chats hidden on other devices
+      if (hiddenSyncedFor !== sessionState.user.userId) {
+        hiddenSyncedFor = sessionState.user.userId;
+        syncHiddenChats(hiddenSyncedFor).then(() => render()).catch(() => { hiddenSyncedFor = null; });
+      }
       // On Android the native app replaces "Add to Home Screen"
       const showAndroidBanner = !!androidRelease && !androidBannerDismissed;
       const showInstallBanner = !showAndroidBanner && !!installPrompt && !installBannerDismissed;

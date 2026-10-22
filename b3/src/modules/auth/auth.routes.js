@@ -243,8 +243,11 @@ function registerAuthRoutes(app) {
       } catch (error) {
         // JWT library errors have specific names; our manual throw has the exact message.
         // Anything else (DB connectivity, pool errors) should return 503 so the client retries.
+        // jose reports bad/expired/forged tokens with ERR_JWS_* / ERR_JWT_* codes (e.g. JWTExpired)
         const jwtErrorNames = ['JsonWebTokenError', 'TokenExpiredError', 'NotBeforeError', 'JWTError'];
-        const isTokenError = jwtErrorNames.includes(error?.name) || (error?.message === 'Invalid refresh token');
+        const isTokenError = jwtErrorNames.includes(error?.name)
+          || /^ERR_JW[ST]_/.test(error?.code || '')
+          || (error?.message === 'Invalid refresh token');
         if (!isTokenError) {
           request.log.error({ err: error }, 'Service error during token refresh');
           return reply.status(503).send({ success: false, error: 'Service temporarily unavailable' });

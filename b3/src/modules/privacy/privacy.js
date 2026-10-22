@@ -17,6 +17,8 @@ async function ensureColumns() {
   await db.query('alter table v3_messages add column if not exists burn_seconds integer');
   // A read made in ghost mode is recorded for the reader (unread counts) but never shown to the sender
   await db.query('alter table v3_message_receipts add column if not exists read_hidden boolean not null default false');
+  // Hidden chats, per member: synced between the person's devices and never pushed
+  await db.query('alter table v3_conversation_members add column if not exists hidden boolean not null default false');
   // Previews of messages deleted or expired before previews were scrubbed on delete
   await db.query(
     `update v3_user_chat_summaries s
@@ -79,6 +81,36 @@ function registerPrivacyRoutes(app) {
     success: true,
     ghostMode: await isGhost(request.auth.userId)
   }));
+
+  app.get('/api/v3/me/hidden-chats', { preHandler: requireAuth }, async (request, reply) => {
+    try {
+      const { rows } = await getPool().query(
+        'select conversation_id from v3_conversation_members where user_id = $1 and hidden',
+        [request.auth.userId]
+      );
+      return { success: true, chatIds: rows.map((r) => r.conversation_id) };
+    } catch (err) {
+      request.log.error({ err }, 'Failed to list hidden chats');
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
+    }
+  });
+
+  app.put('/api/v3/chats/:chatId/hidden', { preHandler: requireAuth }, async (request, reply) => {
+    const parsed = z.object({ hidden: z.boolean() }).safeParse(request.body || {});
+    if (!parsed.success) return reply.status(400).send({ success: false, error: 'Invalid request body' });
+    try {
+      // Only your own membership row: hiding never affects the other person
+      const { rowCount } = await getPool().query(
+        'update v3_conversation_members set hidden = $3 where conversation_id = $1 and user_id = $2',
+        [request.params.chatId, request.auth.userId, parsed.data.hidden]
+      );
+      if (rowCount === 0) return reply.status(404).send({ success: false, error: 'Chat not found' });
+      return { success: true, hidden: parsed.data.hidden };
+    } catch (err) {
+      request.log.error({ err }, 'Failed to update hidden chat');
+      return reply.status(500).send({ success: false, error: 'Internal server error' });
+    }
+  });
 
   app.put('/api/v3/me/privacy', { preHandler: requireAuth }, async (request, reply) => {
     const parsed = z.object({ ghostMode: z.boolean() }).safeParse(request.body || {});

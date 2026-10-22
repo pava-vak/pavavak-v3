@@ -45,9 +45,18 @@ class PavaApplication : Application() {
         repository = ChatRepository(api, store, realtime, media, lock, scope)
         push = com.pavavak.app.push.PushManager(this, api)
         repository.beforeLogout = { push.unregister(); com.pavavak.app.push.Notifier.cancelAll(this) }
+        lock.onHiddenChanged = { chatId, hidden -> scope.launch { runCatching { api.setChatHidden(chatId, hidden) } } }
         // Register for push on every sign-in (and on launch when already signed in)
         scope.launch {
-            repository.session.collect { s -> if (s is com.pavavak.app.data.SessionState.SignedIn) push.register() }
+            repository.session.collect { s ->
+                if (s is com.pavavak.app.data.SessionState.SignedIn) {
+                    push.register()
+                    // Hidden chats are shared by all of this account's devices
+                    runCatching { api.hiddenChats().toSet() }.onSuccess { server ->
+                        for (id in lock.mergeHiddenFromServer(server)) runCatching { api.setChatHidden(id, true) }
+                    }
+                }
+            }
         }
         // Nothing decrypted stays on disk while the app is locked
         lock.onLocked = { if (settings.current.wipeMediaOnLock) media.clear() }

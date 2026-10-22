@@ -184,7 +184,7 @@ fun IntruderAlert(lock: AppLock) {
     )
 }
 
-/** Settings → Privacy. Ghost mode is stored on the server; everything else stays on this phone. */
+/** Settings → Privacy. Ghost mode and hidden chats sync through the server; the rest stays on this phone. */
 @Composable
 fun PrivacySection(repository: ChatRepository, settingsStore: SettingsStore, lock: AppLock, onHiddenChats: () -> Unit) {
     val settings by settingsStore.values.collectAsStateWithLifecycle()

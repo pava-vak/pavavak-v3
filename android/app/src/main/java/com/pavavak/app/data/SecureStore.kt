@@ -57,7 +57,7 @@ class SecureStore(context: Context) {
         get() = prefs.getString(KEY_DECOY_PIN, null)
         set(value) = prefs.edit().putString(KEY_DECOY_PIN, value).apply()
 
-    /** Chats hidden from the list (kept on this phone only, never sent to the server). */
+    /** Chats hidden from the list (cached here; synced with the server for this account only). */
     var hiddenChats: Set<String>
         get() = prefs.getStringSet(KEY_HIDDEN, emptySet())?.toSet() ?: emptySet()
         set(value) = prefs.edit().putStringSet(KEY_HIDDEN, value).apply()
@@ -80,9 +80,14 @@ class SecureStore(context: Context) {
         get() = prefs.getString(KEY_CHAT_CACHE, null)
         set(value) = prefs.edit().putString(KEY_CHAT_CACHE, value).apply()
 
+    /** True once this phone's hidden chats were merged with the server's list. */
+    var hiddenSynced: Boolean
+        get() = prefs.getBoolean(KEY_HIDDEN_SYNCED, false)
+        set(value) = prefs.edit().putBoolean(KEY_HIDDEN_SYNCED, value).apply()
+
     /** Everything tied to the signed-in person's privacy setup on this phone. */
     fun clearPrivacy() {
-        prefs.edit().remove(KEY_PIN).remove(KEY_DECOY_PIN).remove(KEY_HIDDEN).remove(KEY_LOCKED)
+        prefs.edit().remove(KEY_PIN).remove(KEY_DECOY_PIN).remove(KEY_HIDDEN).remove(KEY_HIDDEN_SYNCED).remove(KEY_LOCKED)
             .remove(KEY_FAILED).remove(KEY_FAILED_AT).apply()
     }
 
@@ -100,6 +105,7 @@ class SecureStore(context: Context) {
         const val KEY_DECOY_PIN = "decoy_pin"
         const val KEY_CHAT_CACHE = "chat_cache"
         const val KEY_HIDDEN = "hidden_chats"
+        const val KEY_HIDDEN_SYNCED = "hidden_chats_synced"
         const val KEY_LOCKED = "locked_chats"
         const val KEY_FAILED = "failed_unlocks"
         const val KEY_FAILED_AT = "failed_unlock_at"

@@ -19,7 +19,7 @@ import javax.crypto.spec.PBEKeySpec
  * Privacy extras kept here because they all hinge on who unlocked the app:
  *  - a decoy PIN that opens an empty-looking app,
  *  - a record of wrong PIN attempts, shown after the next real unlock,
- *  - hidden chats and per-chat locks (stored only on this phone).
+ *  - hidden chats (synced with the server so they never notify) and per-chat locks (this phone only).
  */
 class AppLock(private val settings: SettingsStore, private val secure: SecureStore) {
     enum class PinResult { Real, Decoy, Wrong }
@@ -45,6 +45,9 @@ class AppLock(private val settings: SettingsStore, private val secure: SecureSto
 
     private val _intruder = MutableStateFlow<IntruderReport?>(null)
     val intruder: StateFlow<IntruderReport?> = _intruder
+
+    /** Tells the server when a chat is hidden or unhidden (set by the application). */
+    var onHiddenChanged: ((chatId: String, hidden: Boolean) -> Unit)? = null
 
     /** Runs whenever the app locks (the application wipes cached media here). */
     var onLocked: (() -> Unit)? = null
@@ -163,6 +166,19 @@ class AppLock(private val settings: SettingsStore, private val secure: SecureSto
     fun setHidden(chatId: String, hidden: Boolean) {
         _hiddenChats.update { if (hidden) it + chatId else it - chatId }
         secure.hiddenChats = _hiddenChats.value
+        onHiddenChanged?.invoke(chatId, hidden)
+    }
+
+    /**
+     * Applies the server's list. On this phone's first sync, chats hidden here before syncing
+     * existed are kept and returned so the caller can upload them.
+     */
+    fun mergeHiddenFromServer(server: Set<String>): Set<String> {
+        val toUpload = if (secure.hiddenSynced) emptySet() else _hiddenChats.value - server
+        _hiddenChats.value = server + toUpload
+        secure.hiddenChats = _hiddenChats.value
+        secure.hiddenSynced = true
+        return toUpload
     }
 
     fun setChatLocked(chatId: String, locked: Boolean) {
