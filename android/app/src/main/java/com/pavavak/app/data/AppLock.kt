@@ -60,6 +60,9 @@ class AppLock(private val settings: SettingsStore, private val secure: SecureSto
 
     fun allowExternalActivity() { externalPending = true }
 
+    /** True while the app is out at the camera / a picker / another app, so the privacy reset is skipped. */
+    fun hasExternalPending(): Boolean = externalPending
+
     /** Back in front: the round trip is over even if the other screen never fully hid the app. */
     fun onActivityResumed() { externalPending = false }
 

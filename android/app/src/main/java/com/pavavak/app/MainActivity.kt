@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -221,6 +222,25 @@ private fun SignedInApp(repository: ChatRepository, settingsStore: SettingsStore
             notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
     }
+
+    // Privacy: leaving the app (minimise, back, app switch) closes any open photo/video and chat and
+    // returns to the chat list — unless we're out at the camera or a picker. Combined with instant
+    // app lock, reopening always starts on the locked chat list.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    fun resetToChatList() {
+        banner = null
+        app.pendingChat.value = null
+        runCatching { nav.popBackStack(Routes.CHATS, false) }
+    }
+    DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP && !lock.hasExternalPending()) resetToChatList()
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    // When the app locks (instant on leave, Lock now, or shake) also drop back to the chat list
+    LaunchedEffect(lockedNow) { if (lockedNow) resetToChatList() }
 
     val activity = context as? android.app.Activity
     val shake by settingsStore.values.collectAsStateWithLifecycle()

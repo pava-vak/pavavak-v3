@@ -25,8 +25,8 @@ android {
         applicationId = "com.pavavak.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.4.0"
+        versionCode = 9
+        versionName = "1.4.1"
         buildConfigField("String", "API_BASE_URL", "\"https://187-127-190-15.sslip.io\"")
     }
 
