@@ -386,13 +386,22 @@ function registerFeatureRoutes(app) {
         [userId, request.auth.userId]
       );
       if (!rows.length) return reply.status(404).send({ success: false, error: 'User not found' });
-      // Ghost mode works both ways: hidden users can't be seen, and can't see others
-      const { isGhost } = require('../privacy/privacy');
+      // Last seen / online visibility, reciprocal, plus blocking
+      const { getPresencePrefs, presenceVisibility } = require('../privacy/privacy');
       const { isBlockedBetween } = require('./extras');
-      if (await isGhost(userId) || await isGhost(request.auth.userId) || await isBlockedBetween(db, userId, request.auth.userId)) {
+      const [targetPrefs, viewerPrefs] = await Promise.all([
+        getPresencePrefs(userId),
+        getPresencePrefs(request.auth.userId),
+      ]);
+      const vis = presenceVisibility(targetPrefs, viewerPrefs);
+      if (await isBlockedBetween(db, userId, request.auth.userId) || (!vis.lastSeen && !vis.online)) {
         return { success: true, online: false, lastSeenAt: null, hidden: true };
       }
-      return { success: true, online: isUserOnline(userId), lastSeenAt: rows[0].last_seen_at };
+      return {
+        success: true,
+        online: vis.online ? isUserOnline(userId) : false,
+        lastSeenAt: vis.lastSeen ? rows[0].last_seen_at : null,
+      };
     } catch (err) {
       return reply.status(500).send({ success: false, error: 'Internal server error' });
     }

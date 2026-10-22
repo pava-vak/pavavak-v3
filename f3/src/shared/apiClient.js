@@ -250,6 +250,11 @@ export async function setGhostMode(ghostMode) {
   return request('/api/v3/me/privacy', { method: 'PUT', body: JSON.stringify({ ghostMode }) });
 }
 
+// Last seen / online visibility. { lastSeenVisibility: 'everyone'|'nobody', onlineVisibility: 'everyone'|'match' }
+export async function setPresencePrivacy(prefs) {
+  return request('/api/v3/me/privacy', { method: 'PUT', body: JSON.stringify(prefs) });
+}
+
 export async function openViewOnceMessage(messageId) {
   return request(`/api/v3/messages/${encodeURIComponent(messageId)}/view-once-open`, { method: 'POST' });
 }

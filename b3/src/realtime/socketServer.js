@@ -8,7 +8,7 @@ const {
 } = require('./connectionRegistry');
 const chatAdapter = require('../db/chatAdapter');
 const { getPool } = require('../db/pool');
-const { isGhost, isGhostCached } = require('../modules/privacy/privacy');
+const { isGhost, isGhostCached, getPresencePrefs, presenceVisibility } = require('../modules/privacy/privacy');
 
 const typingTimers = new Map();
 
@@ -31,7 +31,11 @@ function attachSocketServer(httpServer) {
     cors: {
       origin: env.webOrigins,
       credentials: true
-    }
+    },
+    // Detect a client that vanished (app swipe-killed, network dropped) within ~30s
+    // instead of the ~45s default, so it stops showing as "online" sooner.
+    pingInterval: 20000,
+    pingTimeout: 10000,
   });
 
   const realtime = require('./eventEmitter');
@@ -67,15 +71,38 @@ function attachSocketServer(httpServer) {
         socket.data.chatIdSet.add(chatId);
       }
 
-      // Ghost mode: never announce this user as online
-      const ghost = await isGhost(user.userId);
-      for (const chatId of ghost ? [] : chatIds) {
-        socket.to(`chat:${chatId}`).emit('presence:online', {
-          chatId,
-          userId: user.userId,
-          displayName: user.displayName,
-          lastSeenAt: new Date().toISOString()
-        });
+      // Map each 1:1 chat to the other member so presence can be gated per viewer
+      const peerByChat = new Map();
+      try {
+        const { rows } = await getPool().query(
+          'select conversation_id, user_id from v3_conversation_members where conversation_id = any($1) and user_id <> $2',
+          [chatIds, user.userId]
+        );
+        for (const r of rows) if (!peerByChat.has(r.conversation_id)) peerByChat.set(r.conversation_id, Number(r.user_id));
+      } catch { /* best effort; fall back to default visibility */ }
+      socket.data.peerByChat = peerByChat;
+
+      // Announce online only to peers allowed to see it (ghost / last-seen / online rules, reciprocal)
+      const selfPrefs = await getPresencePrefs(user.userId);
+      for (const chatId of chatIds) {
+        const peerId = peerByChat.get(chatId);
+        const peerPrefs = peerId ? await getPresencePrefs(peerId) : null;
+        if (presenceVisibility(selfPrefs, peerPrefs).online) {
+          socket.to(`chat:${chatId}`).emit('presence:online', {
+            chatId,
+            userId: user.userId,
+            displayName: user.displayName,
+            lastSeenAt: new Date().toISOString()
+          });
+        }
+        // Snapshot the other way: tell THIS user which peers are already online and visible to them,
+        // so chat-list dots are correct right after (re)connecting instead of only after opening a chat.
+        if (peerId && isUserOnline(peerId)) {
+          const vis = presenceVisibility(peerPrefs, selfPrefs);
+          if (vis.online) {
+            socket.emit('presence:online', { chatId, userId: peerId, lastSeenAt: new Date().toISOString() });
+          }
+        }
       }
     } catch (error) {
       console.error('[socket] connection init failed for user %s: %s', user.userId, error.message);
@@ -133,15 +160,20 @@ function attachSocketServer(httpServer) {
       socket.to(`chat:${chatId}`).emit('typing:stop', { chatId, userId: user.userId });
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       clearTypingTimersForUser(user.userId);
       removeConnection(user.userId, socket.id);
       if (!isUserOnline(user.userId) && !isGhostCached(user.userId)) {
         const lastSeenAt = new Date().toISOString();
         getPool().query('update v3_users set last_seen_at=$1 where user_id=$2', [lastSeenAt, user.userId]).catch(() => {});
-        const chatIds = [...socket.data.chatIdSet];
-        for (const chatId of chatIds) {
-          io.to(`chat:${chatId}`).emit('presence:offline', { chatId, userId: user.userId, lastSeenAt });
+        const selfPrefs = await getPresencePrefs(user.userId);
+        const peerByChat = socket.data.peerByChat || new Map();
+        for (const chatId of socket.data.chatIdSet) {
+          const peerId = peerByChat.get(chatId);
+          const peerPrefs = peerId ? await getPresencePrefs(peerId) : null;
+          // Going offline isn't secret, but the "last seen" time is only sent to peers allowed to see it
+          const showLastSeen = presenceVisibility(selfPrefs, peerPrefs).lastSeen;
+          io.to(`chat:${chatId}`).emit('presence:offline', { chatId, userId: user.userId, lastSeenAt: showLastSeen ? lastSeenAt : null });
         }
       }
     });

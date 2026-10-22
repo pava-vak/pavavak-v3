@@ -94,6 +94,21 @@ export function renderSettingsModal(user = {}, biometricEnrolled = false) {
               <span>👻 Ghost mode</span>
               <button class="settings-lock-btn settings-lock-btn--off" data-role="ghost-toggle" disabled>…</button>
             </div>
+            <div class="settings-lock-row" style="margin-top:8px">
+              <span>🕒 Last seen</span>
+              <select class="settings-select" data-role="last-seen-visibility" disabled>
+                <option value="everyone">Everyone</option>
+                <option value="nobody">Nobody</option>
+              </select>
+            </div>
+            <div class="settings-lock-row" style="margin-top:8px">
+              <span>🟢 Online</span>
+              <select class="settings-select" data-role="online-visibility" disabled>
+                <option value="everyone">Everyone</option>
+                <option value="match">Same as last seen</option>
+              </select>
+            </div>
+            <p class="settings-section-sub" style="margin-top:6px">If you hide your last seen, you won't see other people's either.</p>
             <p class="settings-section-sub" style="margin-top:12px">Hidden chats are hidden on all your devices (never on the other person's) and need your PIN or fingerprint to view.</p>
             <button class="secondary-button" style="margin-top:8px" data-role="view-hidden-chats">🙈 Hidden chats</button>
           </section>
@@ -296,12 +311,32 @@ export function bindSettingsModal(root, { onClose, onUpdateDisplayName, onEnable
       ghostBtn.classList.toggle('settings-lock-btn--off', !on);
       ghostBtn.dataset.on = on ? '1' : '0';
     };
-    import('../../shared/apiClient.js').then(({ getPrivacy, setGhostMode }) => {
-      getPrivacy().then((r) => paint(Boolean(r?.ghostMode))).catch(() => { ghostBtn.textContent = 'Unavailable'; });
+    const lastSeenSel = root.querySelector('[data-role="last-seen-visibility"]');
+    const onlineSel = root.querySelector('[data-role="online-visibility"]');
+    import('../../shared/apiClient.js').then(({ getPrivacy, setGhostMode, setPresencePrivacy }) => {
+      getPrivacy().then((r) => {
+        paint(Boolean(r?.ghostMode));
+        if (lastSeenSel) { lastSeenSel.value = r?.lastSeenVisibility === 'nobody' ? 'nobody' : 'everyone'; lastSeenSel.disabled = false; }
+        if (onlineSel) { onlineSel.value = r?.onlineVisibility === 'match' ? 'match' : 'everyone'; onlineSel.disabled = false; }
+      }).catch(() => { ghostBtn.textContent = 'Unavailable'; });
       ghostBtn.addEventListener('click', async () => {
         const next = ghostBtn.dataset.on !== '1';
         ghostBtn.disabled = true;
         try { await setGhostMode(next); paint(next); } catch { paint(!next); }
+      });
+      lastSeenSel?.addEventListener('change', async () => {
+        const prev = lastSeenSel.dataset.prev || 'everyone';
+        lastSeenSel.disabled = true;
+        try { await setPresencePrivacy({ lastSeenVisibility: lastSeenSel.value }); lastSeenSel.dataset.prev = lastSeenSel.value; }
+        catch { lastSeenSel.value = prev; }
+        finally { lastSeenSel.disabled = false; }
+      });
+      onlineSel?.addEventListener('change', async () => {
+        const prev = onlineSel.dataset.prev || 'everyone';
+        onlineSel.disabled = true;
+        try { await setPresencePrivacy({ onlineVisibility: onlineSel.value }); onlineSel.dataset.prev = onlineSel.value; }
+        catch { onlineSel.value = prev; }
+        finally { onlineSel.disabled = false; }
       });
     });
   }

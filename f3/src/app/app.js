@@ -554,10 +554,13 @@ export function renderAppShell(root) {
   // On socket reconnect (PWA resume from background), reload chats + current thread
   onSocketConnect(() => {
     if (sessionState.status !== 'authenticated') return;
+    // Drop stale presence; the server snapshots who's really online right after connecting
+    onlineUserIds = new Set();
     chatListStore.load();
     if (activeChat) {
       chatThreadStore.openChat(activeChat.chatId);
     }
+    render();
   });
 
   // Close all navigation state and DOM overlays — called on lock so unlock always lands on chat list

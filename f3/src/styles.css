@@ -2984,6 +2984,13 @@ html, body { height: 100%; overscroll-behavior: none; }
 
 .settings-lock-label { font-size: 14px; font-weight: 600; color: var(--v3-text); }
 
+.settings-select {
+  padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 600;
+  color: var(--v3-text); background: var(--v3-surface-2, var(--v3-surface));
+  border: 1px solid var(--v3-border); cursor: pointer;
+}
+.settings-select:disabled { opacity: 0.6; cursor: default; }
+
 .settings-lock-btn {
   padding: 7px 18px; border-radius: 8px; font-size: 13px; font-weight: 700;
   cursor: pointer; border: 1px solid; transition: background 0.15s, color 0.15s;

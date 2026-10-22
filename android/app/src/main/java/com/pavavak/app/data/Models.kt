@@ -211,6 +211,13 @@ data class EditVersion(val text: String = "", val editedAt: String? = null)
 @Serializable
 data class EditHistoryResponse(val edits: List<EditVersion> = emptyList())
 
+@Serializable
+data class PrivacyResponse(
+    val ghostMode: Boolean = false,
+    val lastSeenVisibility: String = "everyone",
+    val onlineVisibility: String = "everyone",
+)
+
 // Latest published Android build, from /download/android.json
 @Serializable
 data class AppRelease(

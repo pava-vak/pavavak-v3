@@ -138,6 +138,12 @@ class ApiClient(private val store: SecureStore) {
         (api(execute("GET", "/api/v3/me/privacy"))["ghostMode"] as? JsonPrimitive)?.content == "true"
     suspend fun setGhostMode(on: Boolean) = execute("PUT", "/api/v3/me/privacy", obj("ghostMode" to on).toString())
 
+    suspend fun presencePrivacy(): PrivacyResponse = decode(execute("GET", "/api/v3/me/privacy"))
+    suspend fun setLastSeenVisibility(value: String) =
+        execute("PUT", "/api/v3/me/privacy", obj("lastSeenVisibility" to value).toString())
+    suspend fun setOnlineVisibility(value: String) =
+        execute("PUT", "/api/v3/me/privacy", obj("onlineVisibility" to value).toString())
+
     suspend fun blockedUsers(): List<String> =
         ((api(execute("GET", "/api/v3/blocks"))["blocked"] as? JsonArray).orEmpty()).mapNotNull { (it as? JsonPrimitive)?.content }
     suspend fun setBlocked(userId: Long, blocked: Boolean) =

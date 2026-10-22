@@ -24,13 +24,17 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Password
 import androidx.compose.material.icons.filled.PhonelinkErase
 import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SpeakerNotesOff
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -191,9 +195,17 @@ fun PrivacySection(repository: ChatRepository, settingsStore: SettingsStore, loc
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var ghost by remember { mutableStateOf<Boolean?>(null) }
+    var lastSeen by remember { mutableStateOf<String?>(null) }   // "everyone" | "nobody"
+    var online by remember { mutableStateOf<String?>(null) }     // "everyone" | "match"
+    var pickLastSeen by remember { mutableStateOf(false) }
+    var pickOnline by remember { mutableStateOf(false) }
     var settingDecoy by remember { mutableStateOf(false) }
     var hasDecoy by remember { mutableStateOf(lock.hasDecoyPin()) }
-    LaunchedEffect(Unit) { runCatching { repository.api.ghostMode() }.onSuccess { ghost = it } }
+    LaunchedEffect(Unit) {
+        runCatching { repository.api.presencePrivacy() }.onSuccess {
+            ghost = it.ghostMode; lastSeen = it.lastSeenVisibility; online = it.onlineVisibility
+        }
+    }
 
     Section("Privacy")
     SwitchRow(
@@ -208,6 +220,43 @@ fun PrivacySection(repository: ChatRepository, settingsStore: SettingsStore, loc
                 .onFailure { ghost = !on; context.toast(it.message ?: "Couldn't change ghost mode") }
         }
     }
+    Row_(Icons.Filled.Schedule, "Last seen",
+        if (lastSeen == null) "…" else if (lastSeen == "nobody") "Nobody" else "Everyone") {
+        if (lastSeen != null) pickLastSeen = true
+    }
+    Row_(Icons.Filled.Visibility, "Online",
+        if (online == null) "…" else if (online == "match") "Same as last seen" else "Everyone") {
+        if (online != null) pickOnline = true
+    }
+
+    if (pickLastSeen) ChoiceDialog(
+        "Last seen", listOf("everyone" to "Everyone", "nobody" to "Nobody"), lastSeen ?: "everyone",
+        onPick = { value ->
+            pickLastSeen = false
+            if (value != lastSeen) {
+                val prev = lastSeen; lastSeen = value
+                scope.launch {
+                    runCatching { repository.api.setLastSeenVisibility(value) }
+                        .onFailure { lastSeen = prev; context.toast(it.message ?: "Couldn't update") }
+                }
+            }
+        },
+        onDismiss = { pickLastSeen = false },
+    )
+    if (pickOnline) ChoiceDialog(
+        "Online", listOf("everyone" to "Everyone", "match" to "Same as last seen"), online ?: "everyone",
+        onPick = { value ->
+            pickOnline = false
+            if (value != online) {
+                val prev = online; online = value
+                scope.launch {
+                    runCatching { repository.api.setOnlineVisibility(value) }
+                        .onFailure { online = prev; context.toast(it.message ?: "Couldn't update") }
+                }
+            }
+        },
+        onDismiss = { pickOnline = false },
+    )
     Row_(Icons.Filled.VisibilityOff, "Hidden chats", "Also: long-press \"PaVa Vak\" on the chat list") { onHiddenChats() }
     SwitchRow(Icons.Filled.SpeakerNotesOff, "Hide message previews", "Show \"New message\" instead of the text in the list and alerts", settings.hidePreviews) {
         settingsStore.setHidePreviews(it)
@@ -233,6 +282,36 @@ fun PrivacySection(repository: ChatRepository, settingsStore: SettingsStore, loc
             }
         },
         onDismiss = { settingDecoy = false },
+    )
+}
+
+/** A simple single-choice picker. [options] are (value, label) pairs. */
+@Composable
+private fun ChoiceDialog(
+    title: String,
+    options: List<Pair<String, String>>,
+    current: String,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                for ((value, label) in options) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { onPick(value) }.padding(vertical = 10.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = value == current, onClick = { onPick(value) })
+                        Text(label, modifier = Modifier.padding(start = 6.dp))
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

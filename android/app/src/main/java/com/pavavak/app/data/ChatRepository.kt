@@ -589,11 +589,13 @@ class ChatRepository(
         val chatId = obj.str("chatId")
         when (event.name) {
             "connect" -> {
+                // Drop stale presence; the server snapshots who's really online right after connecting
+                _online.value = emptySet()
                 refreshChats()
                 activeChatId?.let { openChat(it) }
                 flushOutbox()
             }
-            "disconnect" -> _typing.value = emptyMap()
+            "disconnect" -> { _typing.value = emptyMap(); _online.value = emptySet() }
             "message:new" -> {
                 if (chatId == null) return
                 val message = runCatching { api.json.decodeFromJsonElement<Message>(obj["message"]!!) }.getOrNull() ?: return
