@@ -1,10 +1,22 @@
 const crypto = require('crypto');
+const fs = require('fs');
 const { z } = require('zod');
 const { requireAuth } = require('../../shared/security/auth.preHandler');
 const { hashPassword } = require('../../shared/security/password.service');
+const { env } = require('../../config/env');
 const identity = require('../../db/identityAdapter');
 const chatAdapter = require('../../db/chatAdapter');
 const realtime = require('../../realtime/eventEmitter');
+
+// The currently published Android build, from the download dir's android.json. Best effort.
+function readPublishedRelease() {
+  const path = env.ANDROID_RELEASE_JSON_PATH || '/var/www/pava-vak/downloads/android.json';
+  try {
+    return JSON.parse(fs.readFileSync(path, 'utf8')) || {};
+  } catch {
+    return {};
+  }
+}
 
 async function requireAdmin(request, reply) {
   await requireAuth(request, reply);
@@ -147,7 +159,21 @@ function registerAdminRoutes(app) {
           });
         }
       }
-      return { success: true, count: results.length };
+      // Also push a notification to every Android device so people see it even with the app closed.
+      // The payload is version-only; the app builds the notice and shows the in-app popup on open.
+      let push = { sent: 0, total: 0 };
+      try {
+        const { sendFcmToAll } = require('../notifications/fcm.service');
+        const release = readPublishedRelease();
+        push = await sendFcmToAll({
+          type: 'app_update',
+          versionName: release.versionName || '',
+          versionCode: release.versionCode || 0,
+        });
+      } catch (err) {
+        request.log.error({ err }, 'Update push failed (in-app notice still delivered)');
+      }
+      return { success: true, count: results.length, push };
     } catch (error) {
       request.log.error({ err: error }, 'Failed to broadcast update');
       return reply.status(500).send({ success: false, error: 'Failed to broadcast update' });

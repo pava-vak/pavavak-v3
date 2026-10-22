@@ -118,4 +118,19 @@ async function sendFcmToUser(userId, data) {
   }
 }
 
-module.exports = { ensureTable, isConfigured, saveToken, removeToken, sendFcmToUser };
+/** Wakes every registered device — for app-wide notices like a new version. Never throws. */
+async function sendFcmToAll(data) {
+  if (!isConfigured()) return { sent: 0, total: 0 };
+  try {
+    const { rows } = await getPool().query('select token from v3_fcm_tokens');
+    const payload = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]));
+    const results = await Promise.allSettled(rows.map((r) => sendToToken(r.token, payload)));
+    const sent = results.filter((r) => r.status === 'fulfilled' && r.value).length;
+    return { sent, total: rows.length };
+  } catch (err) {
+    console.error('[fcm] sendFcmToAll failed:', err.message);
+    return { sent: 0, total: 0 };
+  }
+}
+
+module.exports = { ensureTable, isConfigured, saveToken, removeToken, sendFcmToUser, sendFcmToAll };

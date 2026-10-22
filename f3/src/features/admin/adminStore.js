@@ -96,8 +96,8 @@ export function createAdminStore() {
     setState({ broadcastStatus: 'loading' });
     try {
       const result = await requestBroadcastUpdate();
-      setState({ broadcastStatus: 'done', broadcastCount: result.count || 0 });
-      setTimeout(() => setState({ broadcastStatus: 'idle', broadcastCount: 0 }), 4000);
+      setState({ broadcastStatus: 'done', broadcastCount: result.count || 0, broadcastPush: result.push || null });
+      setTimeout(() => setState({ broadcastStatus: 'idle', broadcastCount: 0, broadcastPush: null }), 5000);
     } catch (error) {
       setState({ broadcastStatus: 'error', error: error.message || 'Failed to broadcast' });
       setTimeout(() => setState({ broadcastStatus: 'idle' }), 4000);

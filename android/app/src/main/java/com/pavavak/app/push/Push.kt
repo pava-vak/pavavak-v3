@@ -71,6 +71,7 @@ object Notifier {
     // When a disguise icon is on, all alerts collapse into this one id so they look like a single
     // app notice (e.g. one weather update) instead of a stack of identical messages.
     private const val DISGUISE_ID = 7_314_000
+    private const val UPDATE_ID = 7_314_001
     private val DISGUISE_ICONS = setOf("weather", "clock", "notes", "calculator")
 
     /**
@@ -161,6 +162,40 @@ object Notifier {
         runCatching { NotificationManagerCompat.from(app).notify(notifId, notification) }
     }
 
+    /**
+     * "Update available" alert from a server app_update push. Respects the disguise icon and the
+     * lock-screen name, and never fires while the app is open (the in-app popup covers that).
+     * Tapping opens the app, which shows the update popup once unlocked.
+     */
+    fun showAppUpdate(app: PavaApplication, versionName: String?) {
+        if (!canNotify(app) || app.isInForeground) return
+        ensureChannel(app)
+        val settings = app.settings.current
+        val lock = app.lock
+        val disguise = disguiseNotice(settings.appIcon)
+        val title = disguise?.first ?: if (lock.isConfigured()) settings.lockName else "PaVa Vak"
+        val text = when {
+            disguise != null -> "A software update is available"
+            !versionName.isNullOrBlank() && !lock.isConfigured() -> "Version $versionName is available — tap to update"
+            else -> "Update available — tap to install"
+        }
+        val open = Intent(app, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val pending = PendingIntent.getActivity(app, UPDATE_ID, open,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val notification = NotificationCompat.Builder(app, if (disguise != null) CHANNEL_DISGUISE else CHANNEL_MSG)
+            .setSmallIcon(AppIcons.notificationIcon(settings.appIcon))
+            .setContentTitle(title)
+            .setContentText(text)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
+            .setVisibility(if (disguise != null) NotificationCompat.VISIBILITY_PUBLIC else NotificationCompat.VISIBILITY_PRIVATE)
+            .setAutoCancel(true)
+            .setContentIntent(pending)
+            .build()
+        runCatching { NotificationManagerCompat.from(app).notify(UPDATE_ID, notification) }
+    }
+
     /** Clears the alert for [chatId] — or the shared disguised alert when a disguise icon is on. */
     fun cancel(context: Context, chatId: String) = runCatching {
         val iconId = (context.applicationContext as? PavaApplication)?.settings?.current?.appIcon ?: "default"
@@ -181,10 +216,17 @@ class PavaMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
-        val chatId = message.data["chatId"] ?: return
-        if (message.data["type"] != "message") return
         val app = application as PavaApplication
         if (app.repository.currentUser == null) return
-        scope.launch { Notifier.showMessage(app, chatId) }
+        when (message.data["type"]) {
+            "message" -> {
+                val chatId = message.data["chatId"] ?: return
+                scope.launch { Notifier.showMessage(app, chatId) }
+            }
+            "app_update" -> {
+                val version = message.data["versionName"]
+                scope.launch { Notifier.showAppUpdate(app, version) }
+            }
+        }
     }
 }

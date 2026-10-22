@@ -102,7 +102,7 @@ export function renderAdminView(state) {
             ${state.broadcastStatus === 'loading' ? 'disabled' : ''}>
             ${state.broadcastStatus === 'loading' ? 'Broadcasting…' : '📲 Broadcast Update to All Chats'}
           </button>
-          ${state.broadcastStatus === 'done' ? `<p class="admin-broadcast-result">✓ Sent to ${escapeHtml(String(state.broadcastCount))} chats</p>` : ''}
+          ${state.broadcastStatus === 'done' ? `<p class="admin-broadcast-result">✓ Sent to ${escapeHtml(String(state.broadcastCount))} chats${state.broadcastPush ? ` · 🔔 pushed to ${escapeHtml(String(state.broadcastPush.sent))}/${escapeHtml(String(state.broadcastPush.total))} devices` : ''}</p>` : ''}
           ${state.broadcastStatus === 'error' ? `<p class="error-text admin-broadcast-result">${escapeHtml(state.error)}</p>` : ''}
         </div>
         <div class="admin-refresh-row">
