@@ -169,10 +169,12 @@ function registerMessageRoutes(app) {
         if (!isSender && !mutedUserIds.has(Number(memberId)) && !parsed.data.silent) {
           // Android: only the chat id travels through Google; the app fetches nothing until opened
           sendFcmToUser(memberId, { type: 'message', chatId: parsed.data.chatId });
+          // Privacy: never put the app name or the sender in the web notification — the
+          // browser already attributes it to the installed app; the content stays generic.
           sendPushToUser(memberId, {
             chatId: parsed.data.chatId,
-            title: 'PaVa Vak',
-            body: `${request.auth.displayName || request.auth.username} sent a message`,
+            title: 'New message',
+            body: 'You have a new message',
             icon: '/icon.svg',
             badge: '/icon.svg'
           }).catch(() => {});

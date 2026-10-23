@@ -84,14 +84,14 @@ self.addEventListener('push', (event) => {
     try {
       data = event.data ? event.data.json() : {};
     } catch {
-      data = { title: 'PaVa', body: event.data ? event.data.text() : 'New message' };
+      data = { title: 'New message', body: 'You have a new message' };
     }
 
     // Suppress notification if the app is already open and in focus
     const windowClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
     if (windowClients.some(c => c.focused)) return;
 
-    const title = data.title || 'PaVa';
+    const title = data.title || 'New message';
     const options = {
       body: data.body || 'You have a new message',
       icon: data.icon || '/icon.svg',

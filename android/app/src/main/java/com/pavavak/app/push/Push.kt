@@ -149,6 +149,8 @@ object Notifier {
 
         val notification = NotificationCompat.Builder(app, if (disguise != null) CHANNEL_DISGUISE else CHANNEL_MSG)
             .setSmallIcon(AppIcons.notificationIcon(settings.appIcon))
+            // Override the big round badge (base app icon) with the decoy icon when disguised
+            .setLargeIcon(if (disguise != null) AppIcons.disguiseLargeIcon(app, settings.appIcon) else null)
             .setContentTitle(title)
             .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -185,6 +187,7 @@ object Notifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(app, if (disguise != null) CHANNEL_DISGUISE else CHANNEL_MSG)
             .setSmallIcon(AppIcons.notificationIcon(settings.appIcon))
+            .setLargeIcon(if (disguise != null) AppIcons.disguiseLargeIcon(app, settings.appIcon) else null)
             .setContentTitle(title)
             .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)

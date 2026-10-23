@@ -10,6 +10,7 @@ import android.net.Uri
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import androidx.core.graphics.drawable.toBitmap
 import com.pavavak.app.MainActivity
 import com.pavavak.app.R
 
@@ -42,6 +43,18 @@ object AppIcons {
         "clock" -> R.drawable.ic_stat_clock
         "weather" -> R.drawable.ic_stat_weather
         else -> R.drawable.ic_stat_pava
+    }
+
+    /**
+     * The disguise's full-colour launcher icon as a bitmap, for a notification's large icon.
+     * Samsung and others draw the big round notification badge from the app's base icon (always
+     * PaVa Vak), so for a disguise we override it with the decoy icon. Null for the real icon.
+     */
+    fun disguiseLargeIcon(context: Context, id: String): Bitmap? {
+        if (id == "default") return null
+        val res = OPTIONS.firstOrNull { it.id == id }?.iconRes ?: return null
+        val drawable = androidx.core.content.ContextCompat.getDrawable(context, res) ?: return null
+        return drawable.toBitmap(256, 256)
     }
 
     fun canPinShortcut(context: Context) = ShortcutManagerCompat.isRequestPinShortcutSupported(context)
