@@ -57,6 +57,16 @@ object AppIcons {
         return drawable.toBitmap(256, 256)
     }
 
+    /** Label shown for [id] in Recents / the task switcher. */
+    fun taskLabel(id: String): String = OPTIONS.firstOrNull { it.id == id }?.label ?: "PaVa Vak"
+
+    /** Icon bitmap for [id] for the Recents task card (default icon included, unlike disguiseLargeIcon). */
+    fun taskIcon(context: Context, id: String): Bitmap? {
+        val res = OPTIONS.firstOrNull { it.id == id }?.iconRes ?: R.mipmap.ic_launcher
+        val drawable = androidx.core.content.ContextCompat.getDrawable(context, res) ?: return null
+        return drawable.toBitmap(192, 192)
+    }
+
     fun canPinShortcut(context: Context) = ShortcutManagerCompat.isRequestPinShortcutSupported(context)
 
     /** Adds a home-screen shortcut with any photo and name the user picks. */

@@ -68,6 +68,7 @@ import com.pavavak.app.ui.ChatScreen
 import com.pavavak.app.ui.ContactInfoScreen
 import com.pavavak.app.ui.DevicesScreen
 import com.pavavak.app.ui.GalleryScreen
+import com.pavavak.app.ui.DecoyScreen
 import com.pavavak.app.ui.LockScreen
 import com.pavavak.app.ui.LoginScreen
 import com.pavavak.app.ui.MonitorChatScreen
@@ -163,6 +164,21 @@ private fun PavaRoot(repository: ChatRepository, settingsStore: SettingsStore, l
     val settings by settingsStore.values.collectAsStateWithLifecycle()
     val locked by lock.locked.collectAsStateWithLifecycle()
 
+    // Recents / task-switcher card matches the chosen disguise (name + icon), never "PaVa Vak"
+    val rootContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(settings.appIcon) {
+        (rootContext as? android.app.Activity)?.let { act ->
+            val icon = com.pavavak.app.data.AppIcons.taskIcon(act, settings.appIcon)
+            val label = com.pavavak.app.data.AppIcons.taskLabel(settings.appIcon)
+            runCatching {
+                act.setTaskDescription(
+                    if (icon != null) android.app.ActivityManager.TaskDescription(label, icon)
+                    else android.app.ActivityManager.TaskDescription(label)
+                )
+            }
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
         when (val s = session) {
             SessionState.Loading -> SplashScreen()
@@ -178,7 +194,17 @@ private fun PavaRoot(repository: ChatRepository, settingsStore: SettingsStore, l
                 }
             }
         }
-        if (locked && session is SessionState.SignedIn) LockScreen(settings, lock)
+        // When a disguise icon is on, the app opens to its decoy (a working calculator/clock/
+        // notes/weather); the small "™" reveals the PIN lock. Each re-lock shows the decoy again.
+        if (locked && session is SessionState.SignedIn) {
+            var revealLock by remember { mutableStateOf(false) }
+            LaunchedEffect(locked) { if (locked) revealLock = false }
+            if (settings.appIcon != "default" && !revealLock) {
+                DecoyScreen(settings.appIcon, onReveal = { revealLock = true })
+            } else {
+                LockScreen(settings, lock)
+            }
+        }
     }
 }
 

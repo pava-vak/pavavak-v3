@@ -123,6 +123,13 @@ fun LockScreen(settings: SettingsStore.Values, lock: AppLock) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val canBio = settings.biometricEnabled && remember { biometricAvailable(context) }
     val hasPin = remember { lock.hasPin() }
+    // Never show "PaVa Vak" on the lock when a disguise is on — use the decoy's name (unless the
+    // user set their own lock name).
+    val lockTitle = when {
+        settings.lockName != "PaVa Vak" -> settings.lockName
+        settings.appIcon != "default" -> com.pavavak.app.data.AppIcons.taskLabel(settings.appIcon)
+        else -> settings.lockName
+    }
     var error by remember { mutableStateOf<String?>(null) }
     var failures by remember { mutableIntStateOf(0) }
     var lockedUntil by remember { mutableLongStateOf(0L) }
@@ -134,7 +141,7 @@ fun LockScreen(settings: SettingsStore.Values, lock: AppLock) {
 
     fun bio() {
         val activity = context.findActivity() ?: return
-        promptBiometric(activity, "Unlock ${settings.lockName}", null, onSuccess = { lock.unlock() },
+        promptBiometric(activity, "Unlock $lockTitle", null, onSuccess = { lock.unlock() },
             onError = { if (it != null) error = it })
     }
 
@@ -161,7 +168,7 @@ fun LockScreen(settings: SettingsStore.Values, lock: AppLock) {
             Spacer(Modifier.weight(0.6f))
             LockIcon(settings)
             Spacer(Modifier.height(14.dp))
-            Text(settings.lockName, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = PavaColors.TextPrimary)
+            Text(lockTitle, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = PavaColors.TextPrimary)
             Spacer(Modifier.height(28.dp))
             val waiting = lockedUntil > now
             if (hasPin) {
