@@ -30,7 +30,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher_neutral"
-        android:label="PaVa Vak"
+        android:label="PA Weather"
         android:networkSecurityConfig="@xml/network_security_config"
         android:roundIcon="@mipmap/ic_launcher_neutral"
         android:supportsRtl="true"
