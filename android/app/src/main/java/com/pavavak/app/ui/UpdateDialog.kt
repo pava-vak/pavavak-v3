@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
 import com.pavavak.app.data.AppRelease
 import com.pavavak.app.ui.theme.PavaColors
 import com.pavavak.app.update.UpdateManager
@@ -29,16 +30,23 @@ import com.pavavak.app.update.UpdateManager
 @Composable
 fun UpdateDialog(update: UpdateManager, release: AppRelease, onDismiss: () -> Unit, onUpdate: () -> Unit) {
     val status by update.status.collectAsState()
+    val mandatory by update.mandatory.collectAsState()
     val busy = status is UpdateManager.Status.Downloading || status is UpdateManager.Status.Verifying
 
     AlertDialog(
-        onDismissRequest = { if (!busy) onDismiss() },
+        // A required update can't be dismissed by tapping outside or Back
+        onDismissRequest = { if (!busy && !mandatory) onDismiss() },
+        properties = DialogProperties(dismissOnBackPress = !mandatory, dismissOnClickOutside = !mandatory),
         icon = { Icon(Icons.Filled.SystemUpdate, contentDescription = null, tint = PavaColors.Accent) },
-        title = { Text("Update available", fontWeight = FontWeight.SemiBold) },
+        title = { Text(if (mandatory) "Update required" else "Update available", fontWeight = FontWeight.SemiBold) },
         text = {
             Column {
                 val size = if (release.sizeBytes > 0) " · ${(release.sizeBytes / 1048576f).toInt()} MB" else ""
-                Text("Version ${release.versionName}$size is ready to install.", color = PavaColors.TextPrimary)
+                Text(
+                    if (mandatory) "You need to update to version ${release.versionName}$size to keep using the app."
+                    else "Version ${release.versionName}$size is ready to install.",
+                    color = PavaColors.TextPrimary,
+                )
                 when (val s = status) {
                     is UpdateManager.Status.Downloading -> {
                         Spacer(Modifier.height(14.dp))
@@ -76,8 +84,8 @@ fun UpdateDialog(update: UpdateManager, release: AppRelease, onDismiss: () -> Un
                 Text(if (status is UpdateManager.Status.Failed) "Retry" else "Update")
             }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !busy) { Text("Later") }
+        dismissButton = if (mandatory) null else {
+            { TextButton(onClick = onDismiss, enabled = !busy) { Text("Later") } }
         },
     )
 }

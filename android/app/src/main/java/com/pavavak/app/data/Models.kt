@@ -223,6 +223,8 @@ data class PrivacyResponse(
 data class AppRelease(
     val versionName: String = "",
     val versionCode: Int = 0,
+    // Builds below this must update before the app can be used (breaking change floor). 0 = none forced.
+    val minVersionCode: Int = 0,
     val url: String = "",
     val sizeBytes: Long = 0,
     val sha256: String? = null,

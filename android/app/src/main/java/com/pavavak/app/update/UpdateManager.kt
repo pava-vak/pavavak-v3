@@ -50,11 +50,16 @@ class UpdateManager(private val context: Context, private val api: ApiClient) {
     private val _upToDate = MutableStateFlow(false)
     val upToDate: StateFlow<Boolean> = _upToDate.asStateFlow()
 
+    /** True when this build is below the server's minVersionCode: the update can't be dismissed. */
+    private val _mandatory = MutableStateFlow(false)
+    val mandatory: StateFlow<Boolean> = _mandatory.asStateFlow()
+
     val currentVersionName: String get() = BuildConfig.VERSION_NAME
 
     /**
      * Fetches the latest release and, if its versionCode is higher than this build,
-     * exposes it via [available]. Returns the newer release or null. Never throws.
+     * exposes it via [available]. Marks it [mandatory] when this build is below the
+     * server's minVersionCode. Returns the newer release or null. Never throws.
      */
     suspend fun check(): AppRelease? = withContext(Dispatchers.IO) {
         _upToDate.value = false
@@ -64,15 +69,18 @@ class UpdateManager(private val context: Context, private val api: ApiClient) {
         _status.value = Status.Idle
         if (latest != null && latest.versionCode > BuildConfig.VERSION_CODE) {
             _available.value = latest
+            _mandatory.value = latest.minVersionCode > BuildConfig.VERSION_CODE
             latest
         } else {
             _available.value = null
+            _mandatory.value = false
             _upToDate.value = (latest != null)
             null
         }
     }
 
     fun dismiss() {
+        if (_mandatory.value) return // a required update stays on screen until installed
         _available.value = null
         _upToDate.value = false
         if (_status.value !is Status.Downloading) _status.value = Status.Idle
