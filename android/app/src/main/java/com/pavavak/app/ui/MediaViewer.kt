@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -61,6 +62,19 @@ import java.io.File
 
 private val FullScreen = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
 
+/**
+ * Dismisses a media viewer the instant the app locks. Media viewers are separate Dialog windows,
+ * so the lock overlay sits behind them; closing them here means a photo/video can never be seen
+ * (even for a frame) when the app is reopened.
+ */
+@Composable
+private fun CloseOnLock(onClose: () -> Unit) {
+    val context = LocalContext.current
+    val locked by (context.applicationContext as com.pavavak.app.PavaApplication).lock.locked
+        .collectAsStateWithLifecycle()
+    LaunchedEffect(locked) { if (locked) onClose() }
+}
+
 /** Loads a media file (download on first use) as Compose state: null while loading. */
 @Composable
 fun rememberMediaFile(media: MediaRepository, fileId: String): Result<File>? =
@@ -76,6 +90,7 @@ fun ImageViewer(media: MediaRepository, fileIds: List<String>, startIndex: Int, 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     Dialog(onDismissRequest = onClose, properties = FullScreen) {
+        CloseOnLock(onClose)
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             HorizontalPager(state = pager, modifier = Modifier.fillMaxSize(), beyondViewportPageCount = 1) { page ->
                 ZoomableImage(media, fileIds[page])
@@ -135,6 +150,7 @@ fun VideoViewer(media: MediaRepository, fileId: String, allowSave: Boolean = tru
         onClose()
     }
     Dialog(onDismissRequest = onClose, properties = FullScreen) {
+        CloseOnLock(onClose)
         Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
             when {
                 file == null -> CircularProgressIndicator(color = Color.White)
@@ -176,6 +192,7 @@ fun ViewOnceImage(media: MediaRepository, fileId: String, onClose: () -> Unit) {
         onClose()
     }
     Dialog(onDismissRequest = onClose, properties = FullScreen) {
+        CloseOnLock(onClose)
         Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
             when {
                 file == null -> CircularProgressIndicator(color = Color.White)
