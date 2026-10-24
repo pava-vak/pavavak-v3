@@ -135,6 +135,16 @@ class AppLock(private val settings: SettingsStore, private val secure: SecureSto
     /** Real PIN only; used to open locked or hidden chats. */
     suspend fun verifyPin(pin: String): Boolean = matches(secure.pinRecord, pin)
 
+    /**
+     * For the decoy secret code: unlocks if [pin] is the real or decoy PIN, but a miss costs
+     * nothing (no failed-attempt penalty) so normal calculator use is never punished.
+     */
+    suspend fun tryUnlockSilently(pin: String): Boolean = when {
+        matches(secure.pinRecord, pin) -> { unlockAs(decoy = false); true }
+        matches(secure.decoyPinRecord, pin) -> { unlockAs(decoy = true); true }
+        else -> false
+    }
+
     suspend fun setPin(pin: String) {
         if (matches(secure.decoyPinRecord, pin)) secure.decoyPinRecord = null // the two PINs must never be equal
         secure.pinRecord = record(pin)

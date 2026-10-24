@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -49,13 +50,13 @@ import java.util.Locale
  * chosen everyday app; a small "™" next to the title reveals the PIN lock when tapped.
  */
 @Composable
-fun DecoyScreen(iconId: String, onReveal: () -> Unit) {
+fun DecoyScreen(iconId: String, onReveal: () -> Unit, onSecretCode: suspend (String) -> Boolean) {
     when (iconId) {
-        "calculator" -> CalculatorDecoy(onReveal)
+        "calculator" -> CalculatorDecoy(onReveal, onSecretCode)
         "clock" -> ClockDecoy(onReveal)
         "notes" -> NotesDecoy(onReveal)
         "weather" -> WeatherDecoy(onReveal)
-        else -> CalculatorDecoy(onReveal)
+        else -> CalculatorDecoy(onReveal, onSecretCode)
     }
 }
 
@@ -78,8 +79,9 @@ private fun RevealMark(onReveal: () -> Unit, color: Color) {
 // ── Calculator ───────────────────────────────────────────────────────────────
 
 @Composable
-private fun CalculatorDecoy(onReveal: () -> Unit) {
+private fun CalculatorDecoy(onReveal: () -> Unit, onSecretCode: suspend (String) -> Boolean) {
     val bg = Color(0xFF17181C)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val display = remember { mutableStateOf("0") }
     val stored = remember { mutableStateOf<Double?>(null) }
     val op = remember { mutableStateOf<String?>(null) }
@@ -150,7 +152,11 @@ private fun CalculatorDecoy(onReveal: () -> Unit) {
                                     "±" -> show(current() * -1)
                                     "%" -> show(current() / 100)
                                     "÷", "×", "−", "+" -> operator(label)
-                                    "=" -> equals()
+                                    "=" ->
+                                        // A bare number then "=" may be the secret unlock PIN; a
+                                        // real expression just computes. A wrong code does nothing.
+                                        if (op.value != null) equals()
+                                        else scope.launch { onSecretCode(display.value) }
                                     else -> digit(label)
                                 }
                             },

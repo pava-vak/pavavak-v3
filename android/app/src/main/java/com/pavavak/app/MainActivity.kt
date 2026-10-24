@@ -200,7 +200,11 @@ private fun PavaRoot(repository: ChatRepository, settingsStore: SettingsStore, l
             var revealLock by remember { mutableStateOf(false) }
             LaunchedEffect(locked) { if (locked) revealLock = false }
             if (settings.appIcon != "default" && !revealLock) {
-                DecoyScreen(settings.appIcon, onReveal = { revealLock = true })
+                DecoyScreen(
+                    settings.appIcon,
+                    onReveal = { revealLock = true },
+                    onSecretCode = { code -> lock.tryUnlockSilently(code) },
+                )
             } else {
                 LockScreen(settings, lock)
             }
