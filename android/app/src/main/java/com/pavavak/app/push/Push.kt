@@ -156,6 +156,9 @@ object Notifier {
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)
             .setAutoCancel(true)
+            // Self-dismiss if the caller gives up / the end signal never reaches this device, so a
+            // ringing notification can't get stuck forever.
+            .setTimeoutAfter(45_000)
             .setFullScreenIntent(pending, true)
             .setContentIntent(pending)
             .build()
@@ -282,6 +285,10 @@ class PavaMessagingService : FirebaseMessagingService() {
                 // delivers the buffered offer so the in-app call screen can accept/decline.
                 Notifier.showIncomingCall(app, message.data["fromName"] ?: "Unknown", message.data["media"] == "video")
                 if (app.repository.currentUser != null) app.repository.onAppForeground()
+            }
+            "call_cancel" -> {
+                // Caller gave up before this device answered: clear the ringing notification.
+                Notifier.cancelCall(app)
             }
         }
     }

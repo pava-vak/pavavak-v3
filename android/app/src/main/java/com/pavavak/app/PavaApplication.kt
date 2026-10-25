@@ -50,6 +50,8 @@ class PavaApplication : Application() {
         push = com.pavavak.app.push.PushManager(this, api)
         update = com.pavavak.app.update.UpdateManager(this, api)
         calls = com.pavavak.app.call.CallManager(this, api, realtime, scope)
+        // A live call must keep the app unlocked (auto-lock is suppressed; manual lock still works)
+        lock.isCallActive = { calls.state.value !is com.pavavak.app.call.CallState.Idle }
         repository.beforeLogout = { push.unregister(); com.pavavak.app.push.Notifier.cancelAll(this) }
         lock.onHiddenChanged = { chatId, hidden -> scope.launch { runCatching { api.setChatHidden(chatId, hidden) } } }
         // Register for push on every sign-in (and on launch when already signed in)

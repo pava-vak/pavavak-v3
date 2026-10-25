@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Videocam
@@ -32,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -60,15 +62,23 @@ import org.webrtc.VideoTrack
 fun CallOverlay(calls: CallManager, maskIcon: String? = null, onRequestMicThenStart: (() -> Unit) -> Unit) {
     val state by calls.state.collectAsStateWithLifecycle()
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    LaunchedEffect(state) { if (state !is CallState.Idle) com.pavavak.app.push.Notifier.cancelCall(ctx) }
+    // Minimized: the call shrinks to a top bar so the rest of the app (chats) is usable during a call.
+    var minimized by remember { mutableStateOf(false) }
+    LaunchedEffect(state) {
+        if (state !is CallState.Idle) com.pavavak.app.push.Notifier.cancelCall(ctx)
+        // An incoming ring or a finished call always takes over / clears the minimized state.
+        if (state is CallState.Idle || state is CallState.Incoming) minimized = false
+    }
     AnimatedVisibility(visible = state !is CallState.Idle) {
-        when (val s = state) {
+        if (minimized && state !is CallState.Incoming && state !is CallState.Failed) {
+            MinimizedCallBar(state, calls, onExpand = { minimized = false })
+        } else when (val s = state) {
             is CallState.Outgoing -> CallUi(s.peerName, when (s.phase) {
                 com.pavavak.app.call.OutgoingPhase.RINGING -> "Ringing…"
                 com.pavavak.app.call.OutgoingPhase.OFFLINE -> "${s.peerName.ifBlank { "They" }} is offline — they'll be notified"
                 else -> "Calling…"
-            }, calls, s.media, active = false, incoming = false)
-            is CallState.Connecting -> CallUi(s.peerName, "Connecting…", calls, s.media, active = false, incoming = false)
+            }, calls, s.media, active = false, incoming = false, onMinimize = { minimized = true })
+            is CallState.Connecting -> CallUi(s.peerName, "Connecting…", calls, s.media, active = false, incoming = false, onMinimize = { minimized = true })
             is CallState.Incoming -> {
                 // Masked: show the decoy app's own wording instead of the caller's name/"call".
                 val mask = maskIcon?.let { com.pavavak.app.data.AppIcons.callNotice(it, s.media == CallMedia.VIDEO) }
@@ -79,9 +89,47 @@ fun CallOverlay(calls: CallManager, maskIcon: String? = null, onRequestMicThenSt
                     onAccept = { onRequestMicThenStart { calls.accept() } },
                 )
             }
-            is CallState.Active -> CallUi(s.peerName, null, calls, s.media, active = true, incoming = false, startedAt = s.startedAt)
+            is CallState.Active -> CallUi(s.peerName, null, calls, s.media, active = true, incoming = false, startedAt = s.startedAt, onMinimize = { minimized = true })
             is CallState.Failed -> CallUi("", s.reason, calls, CallMedia.AUDIO, active = false, incoming = false)
             else -> {}
+        }
+    }
+}
+
+/** A slim bar at the top while the call is minimized; tap to return to the full call screen. */
+@Composable
+private fun MinimizedCallBar(state: CallState, calls: CallManager, onExpand: () -> Unit) {
+    val startedAt = (state as? CallState.Active)?.startedAt ?: 0L
+    val label = when (state) {
+        is CallState.Active -> "On call"
+        is CallState.Connecting -> "Connecting…"
+        is CallState.Outgoing -> "Calling…"
+        else -> "Call"
+    }
+    Box(Modifier.fillMaxWidth().safeDrawingPadding().padding(horizontal = 12.dp, vertical = 6.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF1B6E3C))
+                .clickable(onClick = onExpand).padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Call, null, tint = Color.White, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.size(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                if (startedAt > 0L) {
+                    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+                    LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(1000) } }
+                    val secs = ((now - startedAt) / 1000).coerceAtLeast(0)
+                    Text("Tap to return · %d:%02d".format(secs / 60, secs % 60), color = Color(0xFFBFE3CC), fontSize = 12.sp)
+                } else {
+                    Text("Tap to return", color = Color(0xFFBFE3CC), fontSize = 12.sp)
+                }
+            }
+            Box(
+                Modifier.size(40.dp).clip(CircleShape).background(Color(0xFFE5484D))
+                    .clickable { calls.hangUp() },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.CallEnd, "End", tint = Color.White, modifier = Modifier.size(20.dp)) }
         }
     }
 }
@@ -96,6 +144,7 @@ private fun CallUi(
     incoming: Boolean,
     startedAt: Long = 0L,
     onAccept: (() -> Unit)? = null,
+    onMinimize: (() -> Unit)? = null,
 ) {
     val muted by calls.muted.collectAsStateWithLifecycle()
     val speaker by calls.speaker.collectAsStateWithLifecycle()
@@ -115,6 +164,15 @@ private fun CallUi(
                 Modifier.safeDrawingPadding().padding(16.dp).size(108.dp, 150.dp)
                     .align(Alignment.TopEnd).clip(RoundedCornerShape(12.dp)).background(Color.Black),
             ) { VideoRenderer(localVideo, calls, Modifier.fillMaxSize(), mirror = true, overlay = true) }
+        }
+
+        // Minimize chevron (top-left): shrink the call to a bar and use the rest of the app.
+        if (onMinimize != null) {
+            Box(
+                Modifier.safeDrawingPadding().padding(10.dp).size(42.dp).align(Alignment.TopStart)
+                    .clip(CircleShape).background(Color(0x332A3647)).clickable(onClick = onMinimize),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.KeyboardArrowDown, "Minimize", tint = Color.White, modifier = Modifier.size(26.dp)) }
         }
 
         Column(

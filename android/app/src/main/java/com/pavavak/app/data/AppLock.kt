@@ -52,6 +52,9 @@ class AppLock(private val settings: SettingsStore, private val secure: SecureSto
     /** Runs whenever the app locks (the application wipes cached media here). */
     var onLocked: (() -> Unit)? = null
 
+    /** While a call/video call is live the app must not auto-lock; only a manual lock may. */
+    var isCallActive: () -> Boolean = { false }
+
     private var backgroundedAt = 0L
 
     /** Set just before the app opens the camera, a picker or another app, so returning doesn't ask for the PIN. */
@@ -76,6 +79,7 @@ class AppLock(private val settings: SettingsStore, private val secure: SecureSto
         backgroundedAt = SystemClock.elapsedRealtime()
         _unlockedChats.value = emptySet()
         if (externalPending) { externalLeftAt = backgroundedAt; return }
+        if (isCallActive()) return // a live call keeps the app open; only a manual lock locks it
         if (isConfigured() && settings.current.lockTimerSeconds == 0) lock()
     }
 
@@ -83,10 +87,10 @@ class AppLock(private val settings: SettingsStore, private val secure: SecureSto
         if (externalPending) {
             externalPending = false
             // Still lock if the user wandered off for a long time while in the other app
-            if (isConfigured() && SystemClock.elapsedRealtime() - externalLeftAt > EXTERNAL_GRACE_MS) lock()
+            if (isConfigured() && !isCallActive() && SystemClock.elapsedRealtime() - externalLeftAt > EXTERNAL_GRACE_MS) lock()
             return
         }
-        if (!isConfigured() || _locked.value) return
+        if (!isConfigured() || _locked.value || isCallActive()) return
         val elapsed = (SystemClock.elapsedRealtime() - backgroundedAt) / 1000
         if (backgroundedAt != 0L && elapsed >= settings.current.lockTimerSeconds) lock()
     }

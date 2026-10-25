@@ -113,6 +113,12 @@ function registerCallSignaling(io, socket, user) {
     if (!p || !p.toUserId || !p.callId) return;
     clearOffer(Number(p.toUserId)); // caller cancelled before the callee picked up
     io.to(to(p.toUserId)).emit('call:ended', { callId: String(p.callId), fromUserId: user.userId });
+    // If the callee is offline their ringing *notification* won't hear call:ended — push a cancel.
+    if (!isUserOnline(Number(p.toUserId))) {
+      require('../notifications/fcm.service').sendFcmToUser(Number(p.toUserId), {
+        type: 'call_cancel', callId: String(p.callId),
+      });
+    }
   });
 }
 

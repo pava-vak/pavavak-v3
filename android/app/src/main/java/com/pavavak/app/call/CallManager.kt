@@ -99,6 +99,11 @@ class CallManager(
     private var remoteSet = false
     private val pendingRemoteIce = mutableListOf<IceCandidate>()
 
+    // WebRTC teardown (dispose/stopCapture) blocks for a while, so it runs off the UI thread.
+    private val disposeExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private var watchdog: kotlinx.coroutines.Job? = null
+    private val lifecycleLock = Any()
+
     init {
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(appContext).createInitializationOptions()
@@ -121,6 +126,7 @@ class CallManager(
         this.peerId = peerId; this.peerName = peerName; this.media = media; this.isCaller = true
         _state.value = CallState.Outgoing(peerId, peerName, media)
         startRingback() // caller hears ringback immediately; the server's call:ringing upgrades the label
+        startWatchdog()
         scope.launch {
             val ice = runCatching { api.iceServers() }.getOrNull()
             if (ice == null || !createPeer(ice)) { fail("Couldn't start call"); return@launch }
@@ -155,7 +161,9 @@ class CallManager(
     fun accept() {
         val incoming = _state.value as? CallState.Incoming ?: return
         stopRingtone()
+        runCatching { com.pavavak.app.push.Notifier.cancelCall(appContext) }
         _state.value = CallState.Connecting(incoming.peerId, incoming.peerName, incoming.media)
+        startWatchdog()
         scope.launch {
             val ice = runCatching { api.iceServers() }.getOrNull()
             if (ice == null || !createPeer(ice)) { fail("Couldn't connect"); return@launch }
@@ -220,6 +228,11 @@ class CallManager(
                 obj.optJSONObject("sdp"),
             )
             "call:answer" -> if (id == callId) {
+                // The callee picked up: stop ringback and move off "Ringing…" even before media connects.
+                (_state.value as? CallState.Outgoing)?.let {
+                    stopRingback()
+                    _state.value = CallState.Connecting(it.peerId, it.peerName, it.media)
+                }
                 val sdp = obj.optJSONObject("sdp") ?: return
                 pc?.setRemoteDescription(sdpSetObserver { remoteSet = true; drainIce() },
                     SessionDescription(SessionDescription.Type.ANSWER, sdp.getString("description")))
@@ -306,10 +319,7 @@ class CallManager(
         }
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             when (newState) {
-                PeerConnection.PeerConnectionState.CONNECTED -> {
-                    stopRingback(); stopRingtone()
-                    _state.value = CallState.Active(peerId, peerName, media, System.currentTimeMillis())
-                }
+                PeerConnection.PeerConnectionState.CONNECTED -> promoteToActive()
                 PeerConnection.PeerConnectionState.FAILED -> fail("Call failed")
                 PeerConnection.PeerConnectionState.DISCONNECTED,
                 PeerConnection.PeerConnectionState.CLOSED -> if (_state.value is CallState.Active) cleanup(CallState.Idle)
@@ -323,7 +333,15 @@ class CallManager(
             bindRemoteTrack(transceiver?.receiver?.track())
         }
         override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
-        override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
+        override fun onIceConnectionChange(s: PeerConnection.IceConnectionState?) {
+            // Some devices fire a reliable ICE state but a flaky PeerConnectionState, so promote on either.
+            when (s) {
+                PeerConnection.IceConnectionState.CONNECTED,
+                PeerConnection.IceConnectionState.COMPLETED -> promoteToActive()
+                PeerConnection.IceConnectionState.FAILED -> fail("Call failed")
+                else -> {}
+            }
+        }
         override fun onIceConnectionReceivingChange(p0: Boolean) {}
         override fun onIceGatheringChange(p0: PeerConnection.IceGatheringState?) {}
         override fun onIceCandidatesRemoved(p0: Array<out IceCandidate>?) {}
@@ -424,32 +442,67 @@ class CallManager(
 
     private fun send(event: String, data: JSONObject) = realtime.emit(event, data)
 
-    private fun fail(reason: String) {
-        _state.value = CallState.Failed(reason)
-        scope.launch { kotlinx.coroutines.delay(1500); if (_state.value is CallState.Failed) cleanup(CallState.Idle) }
-        teardownPeer()
+    /** Media is up: leave the ringing/connecting screen for the live call (idempotent). */
+    private fun promoteToActive() {
+        val s = _state.value
+        if (s is CallState.Active || s is CallState.Idle || s is CallState.Failed) return
+        watchdog?.cancel(); watchdog = null
+        stopRingback(); stopRingtone()
+        runCatching { com.pavavak.app.push.Notifier.cancelCall(appContext) }
+        _state.value = CallState.Active(peerId, peerName, media, System.currentTimeMillis())
     }
 
-    private fun cleanup(next: CallState) {
-        teardownPeer()
+    /** End an unconnected call that never came up (no answer / couldn't connect). */
+    private fun startWatchdog() {
+        watchdog?.cancel()
+        watchdog = scope.launch {
+            kotlinx.coroutines.delay(45_000)
+            val s = _state.value
+            if (s !is CallState.Active && s !is CallState.Idle) fail("No answer")
+        }
+    }
+
+    private fun fail(reason: String) {
+        synchronized(lifecycleLock) {
+            val s = _state.value
+            if (s is CallState.Idle || s is CallState.Failed) return
+            watchdog?.cancel(); watchdog = null
+            disposeMedia()
+            _state.value = CallState.Failed(reason)
+        }
+        scope.launch { kotlinx.coroutines.delay(1500); if (_state.value is CallState.Failed) cleanup(CallState.Idle) }
+    }
+
+    private fun cleanup(next: CallState) = synchronized(lifecycleLock) {
+        watchdog?.cancel(); watchdog = null
+        disposeMedia()
         _muted.value = false; _speaker.value = false; _cameraOn.value = true
         _state.value = next
     }
 
-    private fun teardownPeer() {
-        stopRingback(); stopRingtone()
-        stopAudioRoute()
-        runCatching { videoCapturer?.stopCapture() }
-        runCatching { videoCapturer?.dispose() }
-        runCatching { surfaceHelper?.dispose() }
-        runCatching { localVideoTrack?.dispose() }
-        runCatching { videoSource?.dispose() }
-        runCatching { localAudio?.dispose() }
-        runCatching { pc?.close(); pc?.dispose() }
-        pc = null; localAudio = null; callId = null; remoteSet = false
-        localVideoTrack = null; videoCapturer = null; videoSource = null; surfaceHelper = null
-        _localVideo.value = null; _remoteVideo.value = null
+    /**
+     * Stops tones immediately and hands the heavy WebRTC teardown (close/dispose/stopCapture, all
+     * blocking) to a background thread so hanging up never freezes the UI. Safe to call twice.
+     */
+    private fun disposeMedia() {
+        stopRingback(); stopRingtone(); stopAudioRoute()
+        runCatching { com.pavavak.app.push.Notifier.cancelCall(appContext) }
+        val oldPc = pc; val oldCap = videoCapturer; val oldSrc = videoSource; val oldHelper = surfaceHelper
+        val oldVideo = localVideoTrack; val oldAudio = localAudio
+        pc = null; videoCapturer = null; videoSource = null; surfaceHelper = null
+        localVideoTrack = null; localAudio = null
+        callId = null; remoteSet = false
         pendingRemoteIce.clear(); pendingOffer = null
+        _localVideo.value = null; _remoteVideo.value = null
+        disposeExecutor.execute {
+            runCatching { oldCap?.stopCapture() }
+            runCatching { oldCap?.dispose() }
+            runCatching { oldHelper?.dispose() }
+            runCatching { oldVideo?.dispose() }
+            runCatching { oldSrc?.dispose() }
+            runCatching { oldAudio?.dispose() }
+            runCatching { oldPc?.close(); oldPc?.dispose() }
+        }
     }
 
     // ── SDP helpers ───────────────────────────────────────────────────────────
