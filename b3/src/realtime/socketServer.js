@@ -10,7 +10,40 @@ const chatAdapter = require('../db/chatAdapter');
 const { getPool } = require('../db/pool');
 const { isGhost, isGhostCached, getPresencePrefs, presenceVisibility } = require('../modules/privacy/privacy');
 
+const realtime = require('./eventEmitter');
+
 const typingTimers = new Map();
+
+/**
+ * Marks every message that arrived for [userId] while they were offline as delivered, and tells
+ * each sender (message:delivered) so it shows two ticks — without the recipient opening each chat.
+ */
+async function deliverPendingFor(userId) {
+  const db = getPool();
+  const { rows } = await db.query(
+    `update v3_message_receipts r
+     set delivered_at = now()
+     from v3_messages msg
+     where r.message_id = msg.message_id
+       and r.user_id = $1
+       and r.delivered_at is null
+       and r.cleared_at is null
+       and msg.sender_id <> $1
+       and msg.deleted_at is null
+     returning r.message_id, msg.conversation_id, msg.sender_id`,
+    [Number(userId)]
+  );
+  for (const row of rows) {
+    const senderUserId = Number(row.sender_id);
+    await db.query(
+      `update v3_user_chat_summaries
+       set last_message_status = 'delivered', updated_at = now()
+       where user_id = $1 and conversation_id = $2 and last_message_id = $3 and last_message_status = 'sent'`,
+      [senderUserId, row.conversation_id, row.message_id]
+    ).catch(() => {});
+    realtime.emitMessageDelivered(senderUserId, { chatId: row.conversation_id, messageId: row.message_id, status: 'delivered' });
+  }
+}
 
 function typingKey(chatId, userId) {
   return `${chatId}:${userId}`;
@@ -58,8 +91,13 @@ function attachSocketServer(httpServer) {
     const firstConnection = !isUserOnline(user.userId);
     addConnection(user.userId, socket.id);
     socket.join(userRoom);
-    // They just came online: deliver anything queued "send when online" for them
-    if (firstConnection) require('../modules/features/extras').flushOnlineQueueFor(user.userId).catch(() => {});
+    // They just came online: deliver anything queued "send when online" for them,
+    // and mark everything that arrived while they were away as delivered (two ticks),
+    // telling each sender — WhatsApp-style, without the recipient having to open each chat.
+    if (firstConnection) {
+      require('../modules/features/extras').flushOnlineQueueFor(user.userId).catch(() => {});
+      deliverPendingFor(user.userId).catch((err) => console.error('[deliver] on connect failed:', err.message));
+    }
 
     // Cache the set of chat IDs this socket is allowed in — used for O(1) typing auth
     socket.data.chatIdSet = new Set();
