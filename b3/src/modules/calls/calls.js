@@ -80,7 +80,11 @@ function registerCallSignaling(io, socket, user) {
     io.to(to(p.toUserId)).emit('call:incoming', payload);
     // Buffer so a backgrounded callee still gets it when they reconnect, and wake their phone.
     bufferOffer(p.toUserId, payload);
-    if (!isUserOnline(Number(p.toUserId))) {
+    const online = isUserOnline(Number(p.toUserId));
+    // Tell the caller whether the callee's device actually got the ring, so the UI can show
+    // "Ringing…" (online) or "<name> is offline — they'll be notified" (push only).
+    socket.emit(online ? 'call:ringing' : 'call:offline', { callId: payload.callId, toUserId: Number(p.toUserId) });
+    if (!online) {
       require('../notifications/fcm.service').sendFcmToUser(Number(p.toUserId), {
         type: 'call', callId: payload.callId, fromUserId: String(user.userId),
         fromName: payload.fromName || '', media: payload.media,

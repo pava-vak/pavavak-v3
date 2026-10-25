@@ -121,6 +121,7 @@ class RealtimeClient(
             "chat:new", "chat:updated", "chat:removed", "typing:start", "typing:stop",
             "presence:online", "presence:offline", "message:reaction", "chat:pinned", "poll:voted", "message:expiry",
             "call:incoming", "call:answer", "call:ice", "call:rejected", "call:ended",
+            "call:ringing", "call:offline",
         )
     }
 }

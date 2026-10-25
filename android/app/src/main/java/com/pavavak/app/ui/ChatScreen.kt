@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -132,18 +133,20 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
     var viewer by remember { mutableStateOf<Viewer?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
 
-    // Voice call: ask for the mic the first time, then ring the peer
+    // Calls: ask for mic (and camera, for video) the first time, then ring the peer
     val callApp = remember { context.applicationContext as com.pavavak.app.PavaApplication }
-    var afterMic by remember { mutableStateOf<(() -> Unit)?>(null) }
-    val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-    ) { granted -> if (granted) afterMic?.invoke(); afterMic = null }
-    fun startVoiceCall() {
+    var afterPerms by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val callPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants -> if (grants.values.all { it }) afterPerms?.invoke(); afterPerms = null }
+    fun startCall(media: com.pavavak.app.call.CallMedia) {
         val p = peer ?: return
-        val action = { callApp.calls.startCall(p, title, com.pavavak.app.call.CallMedia.AUDIO) }
-        if (androidx.core.content.ContextCompat.checkSelfPermission(callApp, android.Manifest.permission.RECORD_AUDIO)
-            == android.content.pm.PackageManager.PERMISSION_GRANTED) action()
-        else { afterMic = action; micLauncher.launch(android.Manifest.permission.RECORD_AUDIO) }
+        val action = { callApp.calls.startCall(p, title, media) }
+        val needed = if (media == com.pavavak.app.call.CallMedia.VIDEO)
+            arrayOf(android.Manifest.permission.RECORD_AUDIO, android.Manifest.permission.CAMERA)
+        else arrayOf(android.Manifest.permission.RECORD_AUDIO)
+        if (needed.all { androidx.core.content.ContextCompat.checkSelfPermission(callApp, it) == android.content.pm.PackageManager.PERMISSION_GRANTED }) action()
+        else { afterPerms = action; callPermLauncher.launch(needed) }
     }
 
     DisposableEffect(chatId) {
@@ -209,7 +212,8 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
         } else {
             ChatHeader(title, status, online = peer != null && peer in online, onBack = onBack, onInfo = onOpenInfo,
                 onSearch = { searchOpen = true }, onGallery = onOpenGallery, menuOpen = menuOpen, onMenu = { menuOpen = it },
-                onCall = if (peer != null) ({ startVoiceCall() }) else null)
+                onCall = if (peer != null) ({ startCall(com.pavavak.app.call.CallMedia.AUDIO) }) else null,
+                onVideoCall = if (peer != null) ({ startCall(com.pavavak.app.call.CallMedia.VIDEO) }) else null)
         }
         if (pinned != null && !searchOpen) PinnedBanner(
             pinned.text,
@@ -411,7 +415,7 @@ private fun JumpToLatestButton(listState: LazyListState, modifier: Modifier, onC
 private fun ChatHeader(
     title: String, status: String, online: Boolean, onBack: () -> Unit, onInfo: () -> Unit,
     onSearch: () -> Unit, onGallery: () -> Unit, menuOpen: Boolean, onMenu: (Boolean) -> Unit,
-    onCall: (() -> Unit)? = null,
+    onCall: (() -> Unit)? = null, onVideoCall: (() -> Unit)? = null,
 ) {
     Surface(color = PavaColors.Surface, contentColor = PavaColors.TextPrimary) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -425,6 +429,7 @@ private fun ChatHeader(
                         color = if (status == "typing…" || status == "online") PavaColors.Accent else PavaColors.TextMuted)
                 }
             }
+            if (onVideoCall != null) IconButton(onClick = onVideoCall) { Icon(Icons.Filled.Videocam, "Video call") }
             if (onCall != null) IconButton(onClick = onCall) { Icon(Icons.Filled.Call, "Voice call") }
             IconButton(onClick = onSearch) { Icon(Icons.Filled.Search, "Search in chat") }
             IconButton(onClick = onGallery) { Icon(Icons.Filled.PhotoLibrary, "Media, docs and voice notes") }

@@ -2,6 +2,13 @@ package com.pavavak.app.call
 
 import android.content.Context
 import android.media.AudioManager
+import android.media.Ringtone
+import android.media.RingtoneManager
+import android.media.ToneGenerator
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import com.pavavak.app.data.ApiClient
 import com.pavavak.app.data.RealtimeClient
 import kotlinx.coroutines.CoroutineScope
@@ -11,6 +18,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.webrtc.AudioTrack
+import org.webrtc.Camera2Enumerator
+import org.webrtc.CameraVideoCapturer
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
@@ -21,14 +30,20 @@ import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
+import org.webrtc.SurfaceTextureHelper
+import org.webrtc.VideoSource
+import org.webrtc.VideoTrack
 import java.util.UUID
 
 /** Call media kind. Voice now; video reuses the same flow with a camera track. */
 enum class CallMedia { AUDIO, VIDEO }
 
+/** What the caller's device knows about the far end while an outgoing call is still connecting. */
+enum class OutgoingPhase { DIALING, RINGING, OFFLINE }
+
 sealed interface CallState {
     data object Idle : CallState
-    data class Outgoing(val peerId: Long, val peerName: String, val media: CallMedia) : CallState
+    data class Outgoing(val peerId: Long, val peerName: String, val media: CallMedia, val phase: OutgoingPhase = OutgoingPhase.DIALING) : CallState
     data class Incoming(val callId: String, val peerId: Long, val peerName: String, val media: CallMedia) : CallState
     data class Connecting(val peerId: Long, val peerName: String, val media: CallMedia) : CallState
     data class Active(val peerId: Long, val peerName: String, val media: CallMedia, val startedAt: Long) : CallState
@@ -53,12 +68,29 @@ class CallManager(
     private val _speaker = MutableStateFlow(false)
     val speaker: StateFlow<Boolean> = _speaker.asStateFlow()
 
+    // Video call state. The renderers in the UI observe these to draw local/remote frames.
+    private val _localVideo = MutableStateFlow<VideoTrack?>(null)
+    val localVideo: StateFlow<VideoTrack?> = _localVideo.asStateFlow()
+    private val _remoteVideo = MutableStateFlow<VideoTrack?>(null)
+    val remoteVideo: StateFlow<VideoTrack?> = _remoteVideo.asStateFlow()
+    private val _cameraOn = MutableStateFlow(true)
+    val cameraOn: StateFlow<Boolean> = _cameraOn.asStateFlow()
+
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val eglBase: EglBase by lazy { EglBase.create() }
+    /** Shared GL context the UI renderers must init with. */
+    val eglContext: EglBase.Context get() = eglBase.eglBaseContext
     private val factory: PeerConnectionFactory by lazy { buildFactory() }
 
     private var pc: PeerConnection? = null
     private var localAudio: AudioTrack? = null
+    private var localVideoTrack: VideoTrack? = null
+    private var videoCapturer: CameraVideoCapturer? = null
+    private var videoSource: VideoSource? = null
+    private var surfaceHelper: SurfaceTextureHelper? = null
+    private var frontFacing = true
+    private var toneGen: ToneGenerator? = null   // caller-side ringback ("ring… ring…")
+    private var ringtone: Ringtone? = null        // receiver-side ringtone
     private var callId: String? = null
     private var peerId: Long = 0
     private var peerName: String = ""
@@ -88,10 +120,12 @@ class CallManager(
         this.callId = UUID.randomUUID().toString()
         this.peerId = peerId; this.peerName = peerName; this.media = media; this.isCaller = true
         _state.value = CallState.Outgoing(peerId, peerName, media)
+        startRingback() // caller hears ringback immediately; the server's call:ringing upgrades the label
         scope.launch {
             val ice = runCatching { api.iceServers() }.getOrNull()
             if (ice == null || !createPeer(ice)) { fail("Couldn't start call"); return@launch }
             addMic()
+            if (media == CallMedia.VIDEO) addCamera()
             pc?.createOffer(sdpObserver(onCreated = { desc ->
                 pc?.setLocalDescription(sdpSetObserver {}, desc)
                 send("call:offer", JSONObject().apply {
@@ -112,6 +146,7 @@ class CallManager(
         this.callId = callId; this.peerId = peerId; this.peerName = peerName; this.media = media; this.isCaller = false
         pendingOffer = offerSdp
         _state.value = CallState.Incoming(callId, peerId, peerName, media)
+        startRingtone()
     }
 
     private var pendingOffer: JSONObject? = null
@@ -119,11 +154,13 @@ class CallManager(
     /** Accept the current incoming call. */
     fun accept() {
         val incoming = _state.value as? CallState.Incoming ?: return
+        stopRingtone()
         _state.value = CallState.Connecting(incoming.peerId, incoming.peerName, incoming.media)
         scope.launch {
             val ice = runCatching { api.iceServers() }.getOrNull()
             if (ice == null || !createPeer(ice)) { fail("Couldn't connect"); return@launch }
             addMic()
+            if (incoming.media == CallMedia.VIDEO) addCamera()
             val offer = pendingOffer
             if (offer != null) {
                 val desc = SessionDescription(SessionDescription.Type.OFFER, offer.getString("description"))
@@ -168,6 +205,15 @@ class CallManager(
         val obj = runCatching { JSONObject(payload) }.getOrNull() ?: return
         val id = obj.optString("callId", "")
         when (name) {
+            "call:ringing" -> if (id == callId) {
+                (_state.value as? CallState.Outgoing)?.let {
+                    _state.value = it.copy(phase = OutgoingPhase.RINGING); startRingback()
+                }
+            }
+            "call:offline" -> if (id == callId) {
+                (_state.value as? CallState.Outgoing)?.let { _state.value = it.copy(phase = OutgoingPhase.OFFLINE) }
+                stopRingback()
+            }
             "call:incoming" -> onIncoming(
                 id, obj.optLong("fromUserId"), obj.optString("fromName", "Unknown"),
                 if (obj.optString("media") == "video") CallMedia.VIDEO else CallMedia.AUDIO,
@@ -211,6 +257,44 @@ class CallManager(
         pc?.addTrack(localAudio, listOf("stream0"))
     }
 
+    private fun addCamera() {
+        val capturer = createCameraCapturer() ?: return
+        videoCapturer = capturer
+        val helper = SurfaceTextureHelper.create("CaptureThread", eglBase.eglBaseContext)
+        surfaceHelper = helper
+        val source = factory.createVideoSource(false)
+        videoSource = source
+        capturer.initialize(helper, appContext, source.capturerObserver)
+        runCatching { capturer.startCapture(1280, 720, 30) }
+        val track = factory.createVideoTrack("video0", source).also { it.setEnabled(_cameraOn.value) }
+        localVideoTrack = track
+        _localVideo.value = track
+        pc?.addTrack(track, listOf("stream0"))
+    }
+
+    /** Prefer the front camera; fall back to any available camera. */
+    private fun createCameraCapturer(): CameraVideoCapturer? {
+        val enumerator = Camera2Enumerator(appContext)
+        val names = enumerator.deviceNames
+        names.firstOrNull { enumerator.isFrontFacing(it) }?.let { frontFacing = true; return enumerator.createCapturer(it, null) }
+        names.firstOrNull { enumerator.isBackFacing(it) }?.let { frontFacing = false; return enumerator.createCapturer(it, null) }
+        return names.firstOrNull()?.let { enumerator.createCapturer(it, null) }
+    }
+
+    /** Toggle the local camera on/off during a video call. */
+    fun toggleVideo() {
+        _cameraOn.value = !_cameraOn.value
+        localVideoTrack?.setEnabled(_cameraOn.value)
+    }
+
+    /** Flip between front and back cameras. */
+    fun switchCamera() {
+        videoCapturer?.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
+            override fun onCameraSwitchDone(isFront: Boolean) { frontFacing = isFront }
+            override fun onCameraSwitchError(error: String?) {}
+        })
+    }
+
     private fun pcObserver() = object : PeerConnection.Observer {
         override fun onIceCandidate(c: IceCandidate) {
             send("call:ice", JSONObject().apply {
@@ -222,8 +306,10 @@ class CallManager(
         }
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             when (newState) {
-                PeerConnection.PeerConnectionState.CONNECTED ->
+                PeerConnection.PeerConnectionState.CONNECTED -> {
+                    stopRingback(); stopRingtone()
                     _state.value = CallState.Active(peerId, peerName, media, System.currentTimeMillis())
+                }
                 PeerConnection.PeerConnectionState.FAILED -> fail("Call failed")
                 PeerConnection.PeerConnectionState.DISCONNECTED,
                 PeerConnection.PeerConnectionState.CLOSED -> if (_state.value is CallState.Active) cleanup(CallState.Idle)
@@ -231,10 +317,10 @@ class CallManager(
             }
         }
         override fun onAddTrack(receiver: org.webrtc.RtpReceiver?, streams: Array<out org.webrtc.MediaStream>?) {
-            (receiver?.track() as? AudioTrack)?.setEnabled(true)
+            bindRemoteTrack(receiver?.track())
         }
         override fun onTrack(transceiver: org.webrtc.RtpTransceiver?) {
-            (transceiver?.receiver?.track() as? AudioTrack)?.setEnabled(true)
+            bindRemoteTrack(transceiver?.receiver?.track())
         }
         override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
         override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
@@ -245,6 +331,13 @@ class CallManager(
         override fun onRemoveStream(p0: org.webrtc.MediaStream?) {}
         override fun onDataChannel(p0: org.webrtc.DataChannel?) {}
         override fun onRenegotiationNeeded() {}
+    }
+
+    private fun bindRemoteTrack(track: MediaStreamTrack?) {
+        when (track) {
+            is AudioTrack -> track.setEnabled(true)
+            is VideoTrack -> { track.setEnabled(true); _remoteVideo.value = track }
+        }
     }
 
     private fun drainIce() {
@@ -275,6 +368,60 @@ class CallManager(
         }
     }
 
+    // ── Ringing tones ─────────────────────────────────────────────────────────
+
+    /** Caller hears a repeating ringback ("ring… ring…") while the far end is ringing. */
+    private fun startRingback() {
+        if (toneGen != null) return
+        runCatching {
+            toneGen = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 70).also {
+                it.startTone(ToneGenerator.TONE_SUP_RINGTONE, -1)
+            }
+        }
+    }
+
+    private fun stopRingback() {
+        runCatching { toneGen?.stopTone(); toneGen?.release() }
+        toneGen = null
+    }
+
+    /** Receiver's phone rings and vibrates until they answer or decline. */
+    private fun startRingtone() {
+        runCatching {
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            ringtone = RingtoneManager.getRingtone(appContext, uri)?.apply {
+                @Suppress("DEPRECATION")
+                runCatching { isLooping = true }
+                play()
+            }
+        }
+        startVibrate()
+    }
+
+    private fun stopRingtone() {
+        runCatching { ringtone?.stop() }
+        ringtone = null
+        stopVibrate()
+    }
+
+    private fun vibrator(): Vibrator? = runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (appContext.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            appContext.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+    }.getOrNull()
+
+    private fun startVibrate() {
+        runCatching {
+            val pattern = longArrayOf(0, 800, 1000) // wait, buzz, gap — repeats
+            vibrator()?.vibrate(VibrationEffect.createWaveform(pattern, 0))
+        }
+    }
+
+    private fun stopVibrate() { runCatching { vibrator()?.cancel() } }
+
     private fun send(event: String, data: JSONObject) = realtime.emit(event, data)
 
     private fun fail(reason: String) {
@@ -285,15 +432,23 @@ class CallManager(
 
     private fun cleanup(next: CallState) {
         teardownPeer()
-        _muted.value = false; _speaker.value = false
+        _muted.value = false; _speaker.value = false; _cameraOn.value = true
         _state.value = next
     }
 
     private fun teardownPeer() {
+        stopRingback(); stopRingtone()
         stopAudioRoute()
+        runCatching { videoCapturer?.stopCapture() }
+        runCatching { videoCapturer?.dispose() }
+        runCatching { surfaceHelper?.dispose() }
+        runCatching { localVideoTrack?.dispose() }
+        runCatching { videoSource?.dispose() }
         runCatching { localAudio?.dispose() }
         runCatching { pc?.close(); pc?.dispose() }
         pc = null; localAudio = null; callId = null; remoteSet = false
+        localVideoTrack = null; videoCapturer = null; videoSource = null; surfaceHelper = null
+        _localVideo.value = null; _remoteVideo.value = null
         pendingRemoteIce.clear(); pendingOffer = null
     }
 

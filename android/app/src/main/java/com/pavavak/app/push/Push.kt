@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -73,7 +75,8 @@ object Notifier {
     private const val DISGUISE_ID = 7_314_000
     private const val UPDATE_ID = 7_314_001
     private const val CALL_ID = 7_314_002
-    private const val CHANNEL_CALL = "calls"
+    // v2: channel sound/vibration are locked after first creation, so a new id applies the ringtone config
+    private const val CHANNEL_CALL = "calls_v2"
     private val DISGUISE_ICONS = setOf("weather", "clock", "notes", "calculator")
 
     /**
@@ -122,12 +125,20 @@ object Notifier {
                 description = "Incoming calls"
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 setBypassDnd(true)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 800, 1000, 800, 1000)
+                val ring = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                val attrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+                if (ring != null) setSound(ring, attrs)
             },
         )
     }
 
     /** Full-screen incoming-call alert. Opening the app connects the socket and shows the call screen. */
-    fun showIncomingCall(app: PavaApplication, fromName: String) {
+    fun showIncomingCall(app: PavaApplication, fromName: String, video: Boolean = false) {
         if (!canNotify(app)) return
         ensureChannel(app)
         val disguise = app.settings.current.appIcon != "default"
@@ -138,7 +149,7 @@ object Notifier {
         val notification = NotificationCompat.Builder(app, CHANNEL_CALL)
             .setSmallIcon(AppIcons.notificationIcon(app.settings.current.appIcon))
             .setContentTitle(if (disguise) "Incoming call" else fromName.ifBlank { "Incoming call" })
-            .setContentText("Incoming voice call")
+            .setContentText(if (video) "Incoming video call" else "Incoming voice call")
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)
@@ -267,7 +278,7 @@ class PavaMessagingService : FirebaseMessagingService() {
             "call" -> {
                 // Ring with a full-screen screen; opening the app connects the socket, which
                 // delivers the buffered offer so the in-app call screen can accept/decline.
-                Notifier.showIncomingCall(app, message.data["fromName"] ?: "Unknown")
+                Notifier.showIncomingCall(app, message.data["fromName"] ?: "Unknown", message.data["media"] == "video")
                 if (app.repository.currentUser != null) app.repository.onAppForeground()
             }
         }

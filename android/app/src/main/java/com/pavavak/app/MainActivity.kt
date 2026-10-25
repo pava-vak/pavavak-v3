@@ -213,15 +213,20 @@ private fun PavaRoot(repository: ChatRepository, settingsStore: SettingsStore, l
         // A call rings/connects above everything, including the lock
         if (session is SessionState.SignedIn) {
             val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as PavaApplication
-            var afterMic by remember { mutableStateOf<(() -> Unit)?>(null) }
-            val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-                androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-            ) { granted -> if (granted) afterMic?.invoke(); afterMic = null }
+            var afterPerms by remember { mutableStateOf<(() -> Unit)?>(null) }
+            val permLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+            ) { grants -> if (grants.values.all { it }) afterPerms?.invoke(); afterPerms = null }
             com.pavavak.app.ui.CallOverlay(app.calls, onRequestMicThenStart = { action ->
                 val ctx = app
-                if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO)
-                    == android.content.pm.PackageManager.PERMISSION_GRANTED) action()
-                else { afterMic = action; micLauncher.launch(android.Manifest.permission.RECORD_AUDIO) }
+                // Accepting a video call needs the camera too; a voice call needs only the mic.
+                val isVideo = (app.calls.state.value as? com.pavavak.app.call.CallState.Incoming)?.media ==
+                    com.pavavak.app.call.CallMedia.VIDEO
+                val needed = if (isVideo)
+                    arrayOf(android.Manifest.permission.RECORD_AUDIO, android.Manifest.permission.CAMERA)
+                else arrayOf(android.Manifest.permission.RECORD_AUDIO)
+                if (needed.all { androidx.core.content.ContextCompat.checkSelfPermission(ctx, it) == android.content.pm.PackageManager.PERMISSION_GRANTED }) action()
+                else { afterPerms = action; permLauncher.launch(needed) }
             })
         }
     }
