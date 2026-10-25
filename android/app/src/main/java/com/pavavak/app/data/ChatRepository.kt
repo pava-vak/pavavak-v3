@@ -106,6 +106,13 @@ class ChatRepository(
 
     val currentUser: User? get() = (_session.value as? SessionState.SignedIn)?.user
 
+    /**
+     * Synchronous "is this device signed in" from encrypted storage — true even before the session
+     * object is restored. Used by the push receiver on a cold start (process woken by a notification)
+     * so a real notification isn't dropped just because the in-memory session isn't ready yet.
+     */
+    fun hasStoredSession(): Boolean = store.accessToken != null && store.user != null
+
     /** Runs before sign-out while the session is still valid (the app unregisters its push token here). */
     var beforeLogout: (suspend () -> Unit)? = null
 

@@ -270,7 +270,9 @@ class PavaMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val app = application as PavaApplication
-        if (app.repository.currentUser == null) return
+        // On a cold start the push can arrive before the session object is rebuilt; fall back to the
+        // stored session so a locked-phone notification isn't dropped. Only bail if truly signed out.
+        if (app.repository.currentUser == null && !app.repository.hasStoredSession()) return
         when (message.data["type"]) {
             "message" -> {
                 val chatId = message.data["chatId"] ?: return

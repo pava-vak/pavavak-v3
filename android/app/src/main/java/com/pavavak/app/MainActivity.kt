@@ -278,6 +278,29 @@ private fun SignedInApp(repository: ChatRepository, settingsStore: SettingsStore
         }
     }
 
+    // Ask once to exempt the app from battery optimization, so the OS doesn't stop it waking on a
+    // push while the phone is locked (Samsung and others otherwise "sleep" it and drop notifications).
+    val batteryLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { }
+    LaunchedEffect(lockedNow) {
+        if (lockedNow) return@LaunchedEffect // only when the user is actually in the app
+        val prefs = context.getSharedPreferences("pava_settings", android.content.Context.MODE_PRIVATE)
+        if (!app.push.isAvailable() || prefs.getBoolean("asked_battery", false)) return@LaunchedEffect
+        val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        if (pm.isIgnoringBatteryOptimizations(context.packageName)) return@LaunchedEffect
+        prefs.edit().putBoolean("asked_battery", true).apply()
+        delay(1500) // let the notification-permission dialog (if any) resolve first
+        lock.allowExternalActivity() // returning from the system dialog must not trip the app lock
+        runCatching {
+            batteryLauncher.launch(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:${context.packageName}"),
+                )
+            )
+        }
+    }
+
     // Privacy: leaving the app (minimise, back, app switch) closes any open photo/video and chat and
     // returns to the chat list — unless we're out at the camera or a picker. Combined with instant
     // app lock, reopening always starts on the locked chat list.
