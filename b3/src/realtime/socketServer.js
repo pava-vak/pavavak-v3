@@ -198,6 +198,9 @@ function attachSocketServer(httpServer) {
       socket.to(`chat:${chatId}`).emit('typing:stop', { chatId, userId: user.userId });
     });
 
+    // Voice/video call signaling (SDP + ICE relay between the two members)
+    require('../modules/calls/calls').registerCallSignaling(io, socket, user);
+
     socket.on('disconnect', async () => {
       clearTypingTimersForUser(user.userId);
       removeConnection(user.userId, socket.id);

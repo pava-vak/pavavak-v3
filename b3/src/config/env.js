@@ -28,7 +28,10 @@ const envSchema = z
     VAPID_PRIVATE_KEY: z.string().min(1).optional(),
     VAPID_SUBJECT: z.string().min(1).default('mailto:admin@pava.app'),
     // Path to the Firebase service-account JSON (outside git). Unset = no Android push.
-    FIREBASE_SERVICE_ACCOUNT_PATH: z.string().min(1).optional()
+    FIREBASE_SERVICE_ACCOUNT_PATH: z.string().min(1).optional(),
+    // TURN/STUN for voice & video calls. Unset = calls unavailable (clients fall back to public STUN only).
+    TURN_SECRET: z.string().min(1).optional(),
+    TURN_HOST: z.string().min(1).optional()
   })
   .superRefine((value, ctx) => {
     const requiresSecrets = value.NODE_ENV === 'production' || value.APP_ENV === 'production';

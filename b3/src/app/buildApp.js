@@ -12,6 +12,7 @@ const { registerMessageRoutes } = require('../modules/messages/message.routes');
 const { registerReceiptRoutes } = require('../modules/receipts/receipt.routes');
 const { registerPrivacyRoutes } = require('../modules/privacy/privacy');
 const { registerExtrasRoutes } = require('../modules/features/extras');
+const { registerCallRoutes } = require('../modules/calls/calls');
 const { registerUserRoutes } = require('../modules/users/user.routes');
 const { registerAdminRoutes } = require('../modules/admin/admin.routes');
 const { registerPushRoutes, registerFcmRoutes } = require('../modules/notifications/push.routes');
@@ -75,6 +76,7 @@ function buildApp() {
     registerReceiptRoutes(instance);
     registerPrivacyRoutes(instance);
     registerExtrasRoutes(instance);
+    registerCallRoutes(instance);
     registerUserRoutes(instance);
     registerAdminRoutes(instance);
     registerPushRoutes(instance);
