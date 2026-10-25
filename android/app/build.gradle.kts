@@ -51,6 +51,9 @@ android {
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
+            // Real phones only — drops the emulator-only x86/x86_64 WebRTC native libs (~half the size).
+            // Debug keeps all ABIs so it still runs on the x86_64 emulator.
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         }
     }
 
