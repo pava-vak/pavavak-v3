@@ -155,6 +155,15 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
         onDispose { repository.closeChat(chatId); AudioPlayer.stop() }
     }
 
+    // Keep the header's online / last-seen honest: re-sync presence over HTTP while the chat is open,
+    // so a dropped or stale realtime event can't leave it stuck (every ~20s, and on return to foreground).
+    if (peer != null) LaunchedEffect(peer) {
+        while (true) {
+            repository.refreshPresence(peer)
+            kotlinx.coroutines.delay(20_000)
+        }
+    }
+
     // Disappearing and burn-after-reading messages vanish on time, even before the server's delete arrives
     var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
     val counting = thread.messages.any { it.expiresAt != null }

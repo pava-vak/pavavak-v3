@@ -65,10 +65,10 @@ function attachSocketServer(httpServer) {
       origin: env.webOrigins,
       credentials: true
     },
-    // Detect a client that vanished (app swipe-killed, network dropped) within ~30s
+    // Detect a client that vanished (app swipe-killed, network dropped) within ~15s
     // instead of the ~45s default, so it stops showing as "online" sooner.
-    pingInterval: 20000,
-    pingTimeout: 10000,
+    pingInterval: 10000,
+    pingTimeout: 5000,
   });
 
   const realtime = require('./eventEmitter');
