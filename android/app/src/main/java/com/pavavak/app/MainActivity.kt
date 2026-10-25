@@ -209,6 +209,21 @@ private fun PavaRoot(repository: ChatRepository, settingsStore: SettingsStore, l
                 LockScreen(settings, lock)
             }
         }
+
+        // A call rings/connects above everything, including the lock
+        if (session is SessionState.SignedIn) {
+            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as PavaApplication
+            var afterMic by remember { mutableStateOf<(() -> Unit)?>(null) }
+            val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+            ) { granted -> if (granted) afterMic?.invoke(); afterMic = null }
+            com.pavavak.app.ui.CallOverlay(app.calls, onRequestMicThenStart = { action ->
+                val ctx = app
+                if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO)
+                    == android.content.pm.PackageManager.PERMISSION_GRANTED) action()
+                else { afterMic = action; micLauncher.launch(android.Manifest.permission.RECORD_AUDIO) }
+            })
+        }
     }
 }
 

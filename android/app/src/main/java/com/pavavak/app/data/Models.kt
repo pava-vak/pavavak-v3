@@ -212,6 +212,20 @@ data class EditVersion(val text: String = "", val editedAt: String? = null)
 data class EditHistoryResponse(val edits: List<EditVersion> = emptyList())
 
 @Serializable
+data class IceServer(
+    val urls: List<String> = emptyList(),
+    val username: String? = null,
+    val credential: String? = null,
+)
+
+@Serializable
+data class IceConfig(
+    val enabled: Boolean = false,
+    val iceServers: List<IceServer> = emptyList(),
+    val ttl: Int = 3600,
+)
+
+@Serializable
 data class PrivacyResponse(
     val ghostMode: Boolean = false,
     val lastSeenVisibility: String = "everyone",

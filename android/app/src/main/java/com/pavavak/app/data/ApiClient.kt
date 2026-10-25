@@ -138,6 +138,8 @@ class ApiClient(private val store: SecureStore) {
         (api(execute("GET", "/api/v3/me/privacy"))["ghostMode"] as? JsonPrimitive)?.content == "true"
     suspend fun setGhostMode(on: Boolean) = execute("PUT", "/api/v3/me/privacy", obj("ghostMode" to on).toString())
 
+    suspend fun iceServers(): IceConfig = decode(execute("GET", "/api/v3/calls/ice"))
+
     suspend fun presencePrivacy(): PrivacyResponse = decode(execute("GET", "/api/v3/me/privacy"))
     suspend fun setLastSeenVisibility(value: String) =
         execute("PUT", "/api/v3/me/privacy", obj("lastSeenVisibility" to value).toString())

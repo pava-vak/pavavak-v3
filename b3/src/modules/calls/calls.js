@@ -10,12 +10,29 @@ const { isUserOnline } = require('../../realtime/connectionRegistry');
 
 const CRED_TTL = 3600; // seconds a TURN credential is valid
 
+// A call offer waiting for a callee who is offline/backgrounded, so it can ring once they reconnect.
+const pendingOffers = new Map(); // calleeUserId -> { ...incomingPayload, expiresAt }
+const OFFER_TTL_MS = 45_000;
+
+function bufferOffer(calleeId, payload) {
+  pendingOffers.set(Number(calleeId), { ...payload, expiresAt: Date.now() + OFFER_TTL_MS });
+}
+function clearOffer(calleeId) { pendingOffers.delete(Number(calleeId)); }
+/** Pops a still-valid buffered offer for [userId] (called when they come online). */
+function takePendingOffer(userId) {
+  const o = pendingOffers.get(Number(userId));
+  if (!o) return null;
+  pendingOffers.delete(Number(userId));
+  return o.expiresAt > Date.now() ? o : null;
+}
+
 /** ICE servers for a client: public STUN + our coturn (time-limited HMAC credential). */
 function iceServersFor(userId) {
-  const servers = [{ urls: 'stun:stun.l.google.com:19302' }];
+  // urls is always an array so every client parses it the same way
+  const servers = [{ urls: ['stun:stun.l.google.com:19302'] }];
   const host = env.TURN_HOST;
   if (host) {
-    servers.push({ urls: `stun:${host}` });
+    servers.push({ urls: [`stun:${host}`] });
     if (env.TURN_SECRET) {
       const username = `${Math.floor(Date.now() / 1000) + CRED_TTL}:${userId}`;
       const credential = crypto.createHmac('sha1', env.TURN_SECRET).update(username).digest('base64');
@@ -61,8 +78,9 @@ function registerCallSignaling(io, socket, user) {
       sdp: p.sdp,
     };
     io.to(to(p.toUserId)).emit('call:incoming', payload);
+    // Buffer so a backgrounded callee still gets it when they reconnect, and wake their phone.
+    bufferOffer(p.toUserId, payload);
     if (!isUserOnline(Number(p.toUserId))) {
-      // Data-only push so a closed app can ring (the app shows the incoming-call screen)
       require('../notifications/fcm.service').sendFcmToUser(Number(p.toUserId), {
         type: 'call', callId: payload.callId, fromUserId: String(user.userId),
         fromName: payload.fromName || '', media: payload.media,
@@ -72,6 +90,7 @@ function registerCallSignaling(io, socket, user) {
 
   socket.on('call:answer', (p) => {
     if (!p || !p.toUserId || !p.callId) return;
+    clearOffer(user.userId); // we (the callee) answered
     io.to(to(p.toUserId)).emit('call:answer', { callId: String(p.callId), fromUserId: user.userId, sdp: p.sdp });
   });
 
@@ -82,13 +101,21 @@ function registerCallSignaling(io, socket, user) {
 
   socket.on('call:reject', (p) => {
     if (!p || !p.toUserId || !p.callId) return;
+    clearOffer(user.userId);
     io.to(to(p.toUserId)).emit('call:rejected', { callId: String(p.callId), fromUserId: user.userId, reason: p.reason || 'declined' });
   });
 
   socket.on('call:end', (p) => {
     if (!p || !p.toUserId || !p.callId) return;
+    clearOffer(Number(p.toUserId)); // caller cancelled before the callee picked up
     io.to(to(p.toUserId)).emit('call:ended', { callId: String(p.callId), fromUserId: user.userId });
   });
 }
 
-module.exports = { iceServersFor, callsEnabled, registerCallRoutes, registerCallSignaling };
+/** On (re)connect, ring the user with a call that came in while they were away (if still valid). */
+function deliverPendingCall(socket, userId) {
+  const offer = takePendingOffer(userId);
+  if (offer) socket.emit('call:incoming', offer);
+}
+
+module.exports = { iceServersFor, callsEnabled, registerCallRoutes, registerCallSignaling, deliverPendingCall };

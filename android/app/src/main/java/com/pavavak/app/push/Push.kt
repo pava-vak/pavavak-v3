@@ -72,6 +72,8 @@ object Notifier {
     // app notice (e.g. one weather update) instead of a stack of identical messages.
     private const val DISGUISE_ID = 7_314_000
     private const val UPDATE_ID = 7_314_001
+    private const val CALL_ID = 7_314_002
+    private const val CHANNEL_CALL = "calls"
     private val DISGUISE_ICONS = setOf("weather", "clock", "notes", "calculator")
 
     /**
@@ -115,7 +117,39 @@ object Notifier {
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             },
         )
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_CALL, "Calls", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Incoming calls"
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+                setBypassDnd(true)
+            },
+        )
     }
+
+    /** Full-screen incoming-call alert. Opening the app connects the socket and shows the call screen. */
+    fun showIncomingCall(app: PavaApplication, fromName: String) {
+        if (!canNotify(app)) return
+        ensureChannel(app)
+        val disguise = app.settings.current.appIcon != "default"
+        val open = Intent(app, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val pending = PendingIntent.getActivity(app, CALL_ID, open,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val notification = NotificationCompat.Builder(app, CHANNEL_CALL)
+            .setSmallIcon(AppIcons.notificationIcon(app.settings.current.appIcon))
+            .setContentTitle(if (disguise) "Incoming call" else fromName.ifBlank { "Incoming call" })
+            .setContentText("Incoming voice call")
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setOngoing(true)
+            .setAutoCancel(true)
+            .setFullScreenIntent(pending, true)
+            .setContentIntent(pending)
+            .build()
+        runCatching { NotificationManagerCompat.from(app).notify(CALL_ID, notification) }
+    }
+
+    fun cancelCall(context: Context) = runCatching { NotificationManagerCompat.from(context).cancel(CALL_ID) }
 
     fun canNotify(context: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
@@ -229,6 +263,12 @@ class PavaMessagingService : FirebaseMessagingService() {
             "app_update" -> {
                 val version = message.data["versionName"]
                 scope.launch { Notifier.showAppUpdate(app, version) }
+            }
+            "call" -> {
+                // Ring with a full-screen screen; opening the app connects the socket, which
+                // delivers the buffered offer so the in-app call screen can accept/decline.
+                Notifier.showIncomingCall(app, message.data["fromName"] ?: "Unknown")
+                if (app.repository.currentUser != null) app.repository.onAppForeground()
             }
         }
     }

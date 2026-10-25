@@ -25,8 +25,8 @@ android {
         applicationId = "com.pavavak.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 17
-        versionName = "1.5.8"
+        versionCode = 18
+        versionName = "1.6.0"
         buildConfigField("String", "API_BASE_URL", "\"https://187-127-190-15.sslip.io\"")
     }
 
@@ -94,6 +94,7 @@ dependencies {
     implementation(libs.socket.io.client) {
         exclude(group = "org.json", module = "json")
     }
+    implementation(libs.stream.webrtc)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.androidx.navigation.compose)

@@ -107,12 +107,20 @@ class RealtimeClient(
         socket?.emit(if (start) "typing:start" else "typing:stop", JSONObject().put("chatId", chatId))
     }
 
+    /** Send a raw event (used for call signaling). No-op if not connected. */
+    fun emit(event: String, data: JSONObject) {
+        socket?.emit(event, data)
+    }
+
+    fun isConnected(): Boolean = socket?.connected() == true
+
     private companion object {
         const val MIN_REFRESH_INTERVAL_MS = 15_000L
         val EVENTS = listOf(
             "message:new", "message:deleted", "message:edited", "message:delivered", "message:read",
             "chat:new", "chat:updated", "chat:removed", "typing:start", "typing:stop",
             "presence:online", "presence:offline", "message:reaction", "chat:pinned", "poll:voted", "message:expiry",
+            "call:incoming", "call:answer", "call:ice", "call:rejected", "call:ended",
         )
     }
 }

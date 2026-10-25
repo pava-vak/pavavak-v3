@@ -27,6 +27,8 @@ class PavaApplication : Application() {
         private set
     lateinit var update: com.pavavak.app.update.UpdateManager
         private set
+    lateinit var calls: com.pavavak.app.call.CallManager
+        private set
 
     /** True while any screen of the app is visible; push notifications are skipped then. */
     @Volatile var isInForeground = false
@@ -47,6 +49,7 @@ class PavaApplication : Application() {
         repository = ChatRepository(api, store, realtime, media, lock, scope)
         push = com.pavavak.app.push.PushManager(this, api)
         update = com.pavavak.app.update.UpdateManager(this, api)
+        calls = com.pavavak.app.call.CallManager(this, api, realtime, scope)
         repository.beforeLogout = { push.unregister(); com.pavavak.app.push.Notifier.cancelAll(this) }
         lock.onHiddenChanged = { chatId, hidden -> scope.launch { runCatching { api.setChatHidden(chatId, hidden) } } }
         // Register for push on every sign-in (and on launch when already signed in)

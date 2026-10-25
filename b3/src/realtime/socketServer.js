@@ -98,6 +98,8 @@ function attachSocketServer(httpServer) {
       require('../modules/features/extras').flushOnlineQueueFor(user.userId).catch(() => {});
       deliverPendingFor(user.userId).catch((err) => console.error('[deliver] on connect failed:', err.message));
     }
+    // Ring for a call that arrived while they were away (app woken by the call push)
+    require('../modules/calls/calls').deliverPendingCall(socket, user.userId);
 
     // Cache the set of chat IDs this socket is allowed in — used for O(1) typing auth
     socket.data.chatIdSet = new Set();

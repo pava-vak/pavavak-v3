@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -131,6 +132,20 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
     var viewer by remember { mutableStateOf<Viewer?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
 
+    // Voice call: ask for the mic the first time, then ring the peer
+    val callApp = remember { context.applicationContext as com.pavavak.app.PavaApplication }
+    var afterMic by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) afterMic?.invoke(); afterMic = null }
+    fun startVoiceCall() {
+        val p = peer ?: return
+        val action = { callApp.calls.startCall(p, title, com.pavavak.app.call.CallMedia.AUDIO) }
+        if (androidx.core.content.ContextCompat.checkSelfPermission(callApp, android.Manifest.permission.RECORD_AUDIO)
+            == android.content.pm.PackageManager.PERMISSION_GRANTED) action()
+        else { afterMic = action; micLauncher.launch(android.Manifest.permission.RECORD_AUDIO) }
+    }
+
     DisposableEffect(chatId) {
         com.pavavak.app.push.Notifier.cancel(context, chatId)
         repository.openChat(chatId)
@@ -193,7 +208,8 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
                 onClose = { searchOpen = false; searchQuery = "" })
         } else {
             ChatHeader(title, status, online = peer != null && peer in online, onBack = onBack, onInfo = onOpenInfo,
-                onSearch = { searchOpen = true }, onGallery = onOpenGallery, menuOpen = menuOpen, onMenu = { menuOpen = it })
+                onSearch = { searchOpen = true }, onGallery = onOpenGallery, menuOpen = menuOpen, onMenu = { menuOpen = it },
+                onCall = if (peer != null) ({ startVoiceCall() }) else null)
         }
         if (pinned != null && !searchOpen) PinnedBanner(
             pinned.text,
@@ -395,6 +411,7 @@ private fun JumpToLatestButton(listState: LazyListState, modifier: Modifier, onC
 private fun ChatHeader(
     title: String, status: String, online: Boolean, onBack: () -> Unit, onInfo: () -> Unit,
     onSearch: () -> Unit, onGallery: () -> Unit, menuOpen: Boolean, onMenu: (Boolean) -> Unit,
+    onCall: (() -> Unit)? = null,
 ) {
     Surface(color = PavaColors.Surface, contentColor = PavaColors.TextPrimary) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -408,6 +425,7 @@ private fun ChatHeader(
                         color = if (status == "typing…" || status == "online") PavaColors.Accent else PavaColors.TextMuted)
                 }
             }
+            if (onCall != null) IconButton(onClick = onCall) { Icon(Icons.Filled.Call, "Voice call") }
             IconButton(onClick = onSearch) { Icon(Icons.Filled.Search, "Search in chat") }
             IconButton(onClick = onGallery) { Icon(Icons.Filled.PhotoLibrary, "Media, docs and voice notes") }
             Box {
