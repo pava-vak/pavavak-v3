@@ -60,6 +60,26 @@ object AppIcons {
     /** Label shown for [id] in Recents / the task switcher. */
     fun taskLabel(id: String): String = OPTIONS.firstOrNull { it.id == id }?.label ?: "PaVa Vak"
 
+    /**
+     * The name the app shows for itself in its own UI. With a disguise on, that's the decoy's name
+     * (so nothing on screen reads "PaVa Vak"); otherwise the user's chosen lock name (default "PaVa Vak").
+     */
+    fun displayName(appIcon: String, lockName: String): String =
+        if (appIcon != "default") taskLabel(appIcon) else lockName.ifBlank { "PaVa Vak" }
+
+    /**
+     * Disguised incoming-call notification wording that matches the decoy app, so a ringing phone
+     * on the lock screen reads as a weather/clock/etc. alert — never "call". Returns (title, text);
+     * an empty title means use the caller's name (real, un-disguised app).
+     */
+    fun callNotice(id: String, video: Boolean): Pair<String, String> = when (id) {
+        "weather" -> "Weather" to if (video) "Thunderstorm warning in your area" else "Rain expected in your area"
+        "clock" -> "Clock" to if (video) "Timer finished" else "Alarm"
+        "calculator" -> "Calculator" to if (video) "History synced" else "Result ready"
+        "notes" -> "Notes" to if (video) "Shared note updated" else "Reminder"
+        else -> "" to if (video) "Incoming video call" else "Incoming voice call"
+    }
+
     /** Icon bitmap for [id] for the Recents task card (default icon included, unlike disguiseLargeIcon). */
     fun taskIcon(context: Context, id: String): Bitmap? {
         val res = OPTIONS.firstOrNull { it.id == id }?.iconRes ?: R.mipmap.ic_launcher

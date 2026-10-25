@@ -94,14 +94,14 @@ fun OnboardingScreen(user: User, settingsStore: SettingsStore, lock: AppLock, on
             when (step) {
                 Step.Welcome -> {
                     Hero(Icons.Filled.Shield, "Welcome, ${user.displayName.substringBefore(' ')}",
-                        "PaVa Vak keeps your one-to-one chats private. Let's take a minute to lock it down and make it yours.")
+                        "This app keeps your one-to-one chats private. Let's take a minute to lock it down and make it yours.")
                     Bullet("Photos and videos only load when you tap them")
                     Bullet("View-once messages and disappearing chats")
                     Bullet("PIN and fingerprint lock, with a disguise icon")
                 }
                 Step.Pin -> {
                     if (pinSet) {
-                        Hero(Icons.Filled.Lock, "PIN is set", "You'll enter it each time you open PaVa Vak.")
+                        Hero(Icons.Filled.Lock, "PIN is set", "You'll enter it each time you open the app.")
                     } else {
                         Text("Set an app PIN", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = PavaColors.TextPrimary)
                         Spacer(Modifier.height(6.dp))

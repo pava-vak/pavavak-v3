@@ -356,7 +356,7 @@ class ApiClient(private val store: SecureStore) {
             if (response.code == 401 && allowRefresh) {
                 when (refresh(tokenUsed)) {
                     RefreshResult.OK -> return@withContext executeBody(method, url, body, allowRefresh = false)
-                    RefreshResult.TRANSIENT -> throw java.io.IOException("Couldn't reach PaVa. Check your connection.")
+                    RefreshResult.TRANSIENT -> throw java.io.IOException("Couldn't reach the server. Check your connection.")
                     RefreshResult.REJECTED -> {
                         if (expireSessionOn401) expireSession()
                         throw ApiException(401, "Session expired")

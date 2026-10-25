@@ -84,24 +84,29 @@ class MediaRepository(private val context: Context, private val api: ApiClient) 
     suspend fun saveToDevice(fileId: String, kind: String, displayName: String? = null): String = withContext(Dispatchers.IO) {
         val source = file(fileId)
         val ext = fileId.substringAfterLast('.', "bin")
-        val name = displayName ?: "PaVa_${System.currentTimeMillis()}.$ext"
-        val (collection, folder, mime) = when (kind) {
-            "image" -> Triple(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, Environment.DIRECTORY_PICTURES, mimeFor(ext, "image/jpeg"))
-            "video" -> Triple(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, Environment.DIRECTORY_MOVIES, mimeFor(ext, "video/mp4"))
-            else -> Triple(
+        val ts = System.currentTimeMillis()
+        // Neutral, camera-style names in the standard folders — never an app-branded "PaVa" folder
+        // or filename, so saved media doesn't give the app away in the phone's Gallery/Files.
+        val (collection, folder, mime, prefix) = when (kind) {
+            "image" -> Quad(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, Environment.DIRECTORY_PICTURES, mimeFor(ext, "image/jpeg"), "IMG")
+            "video" -> Quad(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, Environment.DIRECTORY_MOVIES, mimeFor(ext, "video/mp4"), "VID")
+            else -> Quad(
                 if (Build.VERSION.SDK_INT >= 29) MediaStore.Downloads.EXTERNAL_CONTENT_URI else MediaStore.Files.getContentUri("external"),
-                Environment.DIRECTORY_DOWNLOADS, mimeFor(ext, "application/octet-stream"),
+                Environment.DIRECTORY_DOWNLOADS, mimeFor(ext, "application/octet-stream"), "FILE",
             )
         }
+        val name = displayName ?: "${prefix}_$ts.$ext"
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, mime)
-            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, "$folder/PaVa")
+            if (Build.VERSION.SDK_INT >= 29) put(MediaStore.MediaColumns.RELATIVE_PATH, folder)
         }
         val target = context.contentResolver.insert(collection, values) ?: throw ApiException(0, "Couldn't save the file")
         context.contentResolver.openOutputStream(target)!!.use { out -> source.inputStream().use { it.copyTo(out) } }
-        "$folder/PaVa"
+        folder
     }
+
+    private data class Quad<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 

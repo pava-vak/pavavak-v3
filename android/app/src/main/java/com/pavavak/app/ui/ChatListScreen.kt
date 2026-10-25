@@ -108,6 +108,9 @@ fun ChatListScreen(
     var confirmDelete by remember { mutableStateOf<ChatSummary?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    // The app's own name, disguise-aware: shows the decoy's name (never "PaVa Vak") when disguised
+    val appSettings by (context.applicationContext as com.pavavak.app.PavaApplication).settings.values.collectAsStateWithLifecycle()
+    val appName = com.pavavak.app.data.AppIcons.displayName(appSettings.appIcon, appSettings.lockName)
 
     // Hidden chats never appear here; with the decoy PIN nothing does
     val listed = if (decoy) emptyList() else state.chats.filter { it.chatId !in hidden }
@@ -120,7 +123,7 @@ fun ChatListScreen(
             TopAppBar(
                 // Long-press the title to open hidden chats (after PIN or fingerprint)
                 title = {
-                    Text(if (archived) "Archived" else "PaVa Vak", fontWeight = FontWeight.Bold,
+                    Text(if (archived) "Archived" else appName, fontWeight = FontWeight.Bold,
                         modifier = Modifier.combinedClickable(onClick = {}, onLongClick = { if (!decoy && !archived) onHiddenChats() }))
                 },
                 navigationIcon = {
@@ -199,7 +202,7 @@ fun ChatListScreen(
             }
             SheetAction(Icons.Filled.VisibilityOff, "Hide chat") {
                 lock.setHidden(chat.chatId, true); sheetFor = null
-                context.toast("Hidden. Long-press \"PaVa Vak\" at the top to see hidden chats.")
+                context.toast("Hidden. Long-press \"$appName\" at the top to see hidden chats.")
             }
             val isLocked = chat.chatId in lockedChats
             SheetAction(if (isLocked) Icons.Filled.LockOpen else Icons.Filled.Lock, if (isLocked) "Remove chat lock" else "Lock chat") {

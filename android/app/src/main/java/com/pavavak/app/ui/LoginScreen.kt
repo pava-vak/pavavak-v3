@@ -62,7 +62,7 @@ fun LoginScreen(onLogin: suspend (String, String) -> Unit) {
             } catch (e: ApiException) {
                 error = e.message
             } catch (e: Exception) {
-                error = "Can't reach PaVa. Check your internet connection."
+                error = "Can't reach the server. Check your internet connection."
             } finally {
                 loading = false
             }
@@ -81,9 +81,12 @@ fun LoginScreen(onLogin: suspend (String, String) -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(48.dp))
-        Avatar(name = "PaVa", size = 72.dp)
+        // Disguise-aware: if an icon disguise is on, the sign-in screen wears that name too
+        val loginAppSettings = (androidx.compose.ui.platform.LocalContext.current.applicationContext as com.pavavak.app.PavaApplication).settings.current
+        val loginName = com.pavavak.app.data.AppIcons.displayName(loginAppSettings.appIcon, loginAppSettings.lockName)
+        Avatar(name = loginName, size = 72.dp)
         Spacer(Modifier.height(20.dp))
-        Text("PaVa Vak", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = PavaColors.TextPrimary)
+        Text(loginName, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = PavaColors.TextPrimary)
         Text("Private messages, just between you.", color = PavaColors.TextMuted, fontSize = 15.sp)
         Spacer(Modifier.height(36.dp))
 

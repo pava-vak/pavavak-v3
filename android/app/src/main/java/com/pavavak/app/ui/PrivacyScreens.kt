@@ -179,7 +179,7 @@ fun IntruderAlert(lock: AppLock) {
     AlertDialog(
         onDismissRequest = { lock.dismissIntruderReport() },
         icon = { Icon(Icons.Filled.Warning, null, tint = PavaColors.Danger) },
-        title = { Text("Someone tried to open PaVa Vak") },
+        title = { Text("Someone tried to open this app") },
         text = {
             Text("${r.attempts} wrong PIN ${if (r.attempts == 1) "attempt" else "attempts"} while the app was locked." +
                 if (r.lastAt > 0) " Last one: ${formatDateTime(Instant.ofEpochMilli(r.lastAt).toString())}." else "")
@@ -257,7 +257,7 @@ fun PrivacySection(repository: ChatRepository, settingsStore: SettingsStore, loc
         },
         onDismiss = { pickOnline = false },
     )
-    Row_(Icons.Filled.VisibilityOff, "Hidden chats", "Also: long-press \"PaVa Vak\" on the chat list") { onHiddenChats() }
+    Row_(Icons.Filled.VisibilityOff, "Hidden chats", "Also: long-press \"${com.pavavak.app.data.AppIcons.displayName(settings.appIcon, settings.lockName)}\" on the chat list") { onHiddenChats() }
     SwitchRow(Icons.Filled.SpeakerNotesOff, "Hide message previews", "Show \"New message\" instead of the text in the list and alerts", settings.hidePreviews) {
         settingsStore.setHidePreviews(it)
     }

@@ -68,7 +68,7 @@ fun UpdateDialog(update: UpdateManager, release: AppRelease, onDismiss: () -> Un
                     }
                     is UpdateManager.Status.NeedsPermission -> {
                         Spacer(Modifier.height(10.dp))
-                        Text("Allow PaVa Vak to install apps, then tap Update again.",
+                        Text("Allow this app to install apps, then tap Update again.",
                             color = PavaColors.TextMuted, fontSize = 12.sp)
                     }
                     is UpdateManager.Status.Failed -> {

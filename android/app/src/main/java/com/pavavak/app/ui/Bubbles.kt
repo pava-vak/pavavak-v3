@@ -236,8 +236,8 @@ private fun BubbleBody(
         }
         MessageContent.Poll -> PollBlock(message, monitor) { idx -> callbacks.onVote(message, idx) }
         MessageContent.SystemUpdate -> Column {
-            Text("🔄 PaVa Vak updated", fontWeight = FontWeight.SemiBold)
-            Text("A new version is available.", fontSize = 13.sp, color = muted)
+            Text("🔄 Update available", fontWeight = FontWeight.SemiBold)
+            Text("A new version is ready to install.", fontSize = 13.sp, color = muted)
         }
     }
 }

@@ -201,7 +201,7 @@ fun SettingsScreen(
 
             Section("App icon")
             Text(
-                "Disguise how PaVa Vak looks on your home screen. Notifications use the same icon.",
+                "Disguise how this app looks on your home screen. Notifications use the same icon.",
                 color = PavaColors.TextMuted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp),
             )
             AppIconPicker(settings.appIcon) { id ->
@@ -447,7 +447,7 @@ private fun CustomShortcutDialog(onDismiss: () -> Unit) {
         title = { Text("Shortcut with your photo") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Adds a home-screen shortcut that opens PaVa Vak. For a full disguise, also pick a disguise icon above and remove the original icon from your home screen.",
+                Text("Adds a home-screen shortcut that opens this app. For a full disguise, also pick a disguise icon above and remove the original icon from your home screen.",
                     fontSize = 13.sp, color = PavaColors.TextMuted)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(56.dp).clip(CircleShape).background(PavaColors.SurfaceHigh).clickable {

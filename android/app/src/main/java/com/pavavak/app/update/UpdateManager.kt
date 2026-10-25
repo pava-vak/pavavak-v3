@@ -115,7 +115,7 @@ class UpdateManager(private val context: Context, private val api: ApiClient) {
     private fun download(release: AppRelease): File? {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
         // Keep one file; overwrite any partial download from before.
-        val dest = File(dir, "pava-update.apk")
+        val dest = File(dir, "update.apk")
         val url = if (release.url.startsWith("http")) release.url
         else BuildConfig.API_BASE_URL.trimEnd('/') + "/" + release.url.trimStart('/')
         try {

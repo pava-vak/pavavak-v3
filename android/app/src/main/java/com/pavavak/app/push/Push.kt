@@ -141,15 +141,17 @@ object Notifier {
     fun showIncomingCall(app: PavaApplication, fromName: String, video: Boolean = false) {
         if (!canNotify(app)) return
         ensureChannel(app)
-        val disguise = app.settings.current.appIcon != "default"
+        val icon = app.settings.current.appIcon
+        val disguise = icon != "default"
+        val (dTitle, dText) = AppIcons.callNotice(icon, video)
         val open = Intent(app, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val pending = PendingIntent.getActivity(app, CALL_ID, open,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(app, CHANNEL_CALL)
-            .setSmallIcon(AppIcons.notificationIcon(app.settings.current.appIcon))
-            .setContentTitle(if (disguise) "Incoming call" else fromName.ifBlank { "Incoming call" })
-            .setContentText(if (video) "Incoming video call" else "Incoming voice call")
+            .setSmallIcon(AppIcons.notificationIcon(icon))
+            .setContentTitle(if (disguise) dTitle else fromName.ifBlank { "Incoming call" })
+            .setContentText(dText)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)

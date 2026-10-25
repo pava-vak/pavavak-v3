@@ -217,7 +217,10 @@ private fun PavaRoot(repository: ChatRepository, settingsStore: SettingsStore, l
             val permLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
                 androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
             ) { grants -> if (grants.values.all { it }) afterPerms?.invoke(); afterPerms = null }
-            com.pavavak.app.ui.CallOverlay(app.calls, onRequestMicThenStart = { action ->
+            // While disguised AND locked, the ringing screen must read as the decoy app, not reveal
+            // the caller — same cover as the notification. The real name appears only after answering.
+            val maskIcon = if (settings.appIcon != "default" && locked) settings.appIcon else null
+            com.pavavak.app.ui.CallOverlay(app.calls, maskIcon = maskIcon, onRequestMicThenStart = { action ->
                 val ctx = app
                 // Accepting a video call needs the camera too; a voice call needs only the mic.
                 val isVideo = (app.calls.state.value as? com.pavavak.app.call.CallState.Incoming)?.media ==

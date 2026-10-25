@@ -51,9 +51,13 @@ import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoTrack
 
-/** Full-screen call overlay shown above everything while a call is ringing or active. */
+/**
+ * Full-screen call overlay shown above everything while a call is ringing or active.
+ * [maskIcon] non-null (a disguise id) means the phone is disguised AND locked: the ringing screen
+ * must read as that decoy app and never show the caller — the real name appears only after answering.
+ */
 @Composable
-fun CallOverlay(calls: CallManager, onRequestMicThenStart: (() -> Unit) -> Unit) {
+fun CallOverlay(calls: CallManager, maskIcon: String? = null, onRequestMicThenStart: (() -> Unit) -> Unit) {
     val state by calls.state.collectAsStateWithLifecycle()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(state) { if (state !is CallState.Idle) com.pavavak.app.push.Notifier.cancelCall(ctx) }
@@ -65,8 +69,16 @@ fun CallOverlay(calls: CallManager, onRequestMicThenStart: (() -> Unit) -> Unit)
                 else -> "Calling…"
             }, calls, s.media, active = false, incoming = false)
             is CallState.Connecting -> CallUi(s.peerName, "Connecting…", calls, s.media, active = false, incoming = false)
-            is CallState.Incoming -> CallUi(s.peerName, "Incoming ${if (s.media == CallMedia.VIDEO) "video " else ""}call", calls, s.media, active = false, incoming = true,
-                onAccept = { onRequestMicThenStart { calls.accept() } })
+            is CallState.Incoming -> {
+                // Masked: show the decoy app's own wording instead of the caller's name/"call".
+                val mask = maskIcon?.let { com.pavavak.app.data.AppIcons.callNotice(it, s.media == CallMedia.VIDEO) }
+                CallUi(
+                    mask?.first ?: s.peerName,
+                    mask?.second ?: "Incoming ${if (s.media == CallMedia.VIDEO) "video " else ""}call",
+                    calls, s.media, active = false, incoming = true,
+                    onAccept = { onRequestMicThenStart { calls.accept() } },
+                )
+            }
             is CallState.Active -> CallUi(s.peerName, null, calls, s.media, active = true, incoming = false, startedAt = s.startedAt)
             is CallState.Failed -> CallUi("", s.reason, calls, CallMedia.AUDIO, active = false, incoming = false)
             else -> {}
