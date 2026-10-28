@@ -227,6 +227,34 @@ class ChatRepository(
 
     suspend fun searchUsers(query: String) = api.searchUsers(query)
 
+    // ── Groups ────────────────────────────────────────────────────────────────
+
+    private val _groupDetails = MutableStateFlow<Map<String, GroupDetail>>(emptyMap())
+    val groupDetails: StateFlow<Map<String, GroupDetail>> = _groupDetails
+
+    suspend fun createGroup(title: String, memberIds: List<Long>): ChatSummary {
+        val chat = api.createGroup(title, memberIds)
+        _chatList.update { s -> s.copy(chats = sortChats(listOf(chat) + s.chats.filter { it.chatId != chat.chatId })) }
+        return chat
+    }
+
+    fun refreshGroupDetail(chatId: String) = scope.launch {
+        runCatching { api.groupDetail(chatId) }.onSuccess { d -> _groupDetails.update { it + (chatId to d) } }
+    }
+
+    suspend fun addGroupMembers(chatId: String, memberIds: List<Long>) { api.addGroupMembers(chatId, memberIds); refreshGroupDetail(chatId) }
+    suspend fun removeGroupMember(chatId: String, userId: Long) { api.removeGroupMember(chatId, userId); refreshGroupDetail(chatId) }
+    suspend fun renameGroup(chatId: String, title: String) { api.renameGroup(chatId, title); refreshGroupDetail(chatId) }
+    suspend fun setGroupRole(chatId: String, userId: Long, role: String) { api.setGroupRole(chatId, userId, role); refreshGroupDetail(chatId) }
+    suspend fun leaveGroup(chatId: String) {
+        api.leaveGroup(chatId)
+        _chatList.update { s -> s.copy(chats = s.chats.filter { it.chatId != chatId }) }
+        _threads.update { it - chatId }
+        _groupDetails.update { it - chatId }
+    }
+
+    fun groupDetail(chatId: String): GroupDetail? = _groupDetails.value[chatId]
+
     suspend fun startSelfChat(): ChatSummary {
         val chat = api.startSelfChat()
         _chatList.update { s -> if (s.chats.any { it.chatId == chat.chatId }) s else s.copy(chats = sortChats(listOf(chat) + s.chats)) }
@@ -306,6 +334,7 @@ class ChatRepository(
         scope.launch { runCatching { api.reactions(chatId) }.onSuccess { r -> _reactions.update { it + (chatId to r) } } }
         scope.launch { runCatching { api.pinned(chatId) }.onSuccess { p -> _pinned.update { it + (chatId to p) } } }
         chat(chatId)?.peerUserId?.let { refreshPresence(it) }
+        if (chat(chatId)?.isGroup == true) refreshGroupDetail(chatId)
     }
 
     fun refreshPresence(userId: Long) = scope.launch {
@@ -663,6 +692,7 @@ class ChatRepository(
                 val votes = (obj["votes"] as? JsonObject)?.mapValues { (it.value as? JsonPrimitive)?.content?.toIntOrNull() ?: 0 } ?: return
                 if (chatId != null) applyPoll(chatId, messageId, votes, null)
             }
+            "group:updated" -> if (chatId != null) refreshGroupDetail(chatId)
             "chat:new" -> refreshChats()
             "chat:removed" -> if (chatId != null) _chatList.update { s -> s.copy(chats = s.chats.filter { it.chatId != chatId }) }
             "typing:start" -> if (chatId != null) _typing.update { it + (chatId to (obj.str("displayName") ?: "typing")) }

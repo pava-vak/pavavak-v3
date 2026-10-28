@@ -73,6 +73,8 @@ import com.pavavak.app.ui.LockScreen
 import com.pavavak.app.ui.LoginScreen
 import com.pavavak.app.ui.MonitorChatScreen
 import com.pavavak.app.ui.NewChatScreen
+import com.pavavak.app.ui.NewGroupScreen
+import com.pavavak.app.ui.GroupInfoScreen
 import com.pavavak.app.ui.OnboardingScreen
 import com.pavavak.app.ui.ScheduledScreen
 import com.pavavak.app.ui.SearchScreen
@@ -111,9 +113,20 @@ class MainActivity : FragmentActivity() {
 
     /** A notification tap carries the chat to open; it waits until the app is unlocked. */
     private fun takeChatFromIntent(intent: android.content.Intent?) {
+        val app = application as PavaApplication
+        // A tapped group-call notification raises the in-app ring once the app is up.
+        val gcallId = intent?.getStringExtra(com.pavavak.app.push.Notifier.EXTRA_GCALL_ID)
+        if (gcallId != null) {
+            val chatId = intent.getStringExtra(com.pavavak.app.push.Notifier.EXTRA_GCALL_CHAT).orEmpty()
+            val name = intent.getStringExtra(com.pavavak.app.push.Notifier.EXTRA_GCALL_NAME) ?: "Group call"
+            val video = intent.getStringExtra(com.pavavak.app.push.Notifier.EXTRA_GCALL_MEDIA) == "video"
+            intent.removeExtra(com.pavavak.app.push.Notifier.EXTRA_GCALL_ID)
+            app.pendingGroupCall.value = PavaApplication.PendingGroupCall(gcallId, chatId, name, video)
+            return
+        }
         val chatId = intent?.getStringExtra(com.pavavak.app.push.Notifier.EXTRA_CHAT_ID) ?: return
         intent.removeExtra(com.pavavak.app.push.Notifier.EXTRA_CHAT_ID)
-        (application as PavaApplication).pendingChat.value = chatId
+        app.pendingChat.value = chatId
     }
 
     override fun onResume() {
@@ -140,6 +153,7 @@ private object Routes {
     const val CHATS = "chats"
     const val ARCHIVED = "archived"
     const val NEW_CHAT = "new"
+    const val NEW_GROUP = "newgroup"
     const val CHAT = "chat/{chatId}"
     const val INFO = "info/{chatId}"
     const val GALLERY = "gallery/{chatId}?admin={admin}&title={title}"
@@ -231,6 +245,44 @@ private fun PavaRoot(repository: ChatRepository, settingsStore: SettingsStore, l
                 if (needed.all { androidx.core.content.ContextCompat.checkSelfPermission(ctx, it) == android.content.pm.PackageManager.PERMISSION_GRANTED }) action()
                 else { afterPerms = action; permLauncher.launch(needed) }
             })
+
+            // Group calls: the same overlay pattern, with a participant grid. Names resolve from the
+            // group's member list so the grid shows real names, not raw user ids.
+            val groupDetails by app.repository.groupDetails.collectAsStateWithLifecycle()
+            var gAfterPerms by remember { mutableStateOf<(() -> Unit)?>(null) }
+            val gPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+            ) { grants -> if (grants.values.all { it }) gAfterPerms?.invoke(); gAfterPerms = null }
+            val gState = app.groupCalls.state
+            val nameFor: (Long) -> String = { id ->
+                val activeChatId = (gState.value as? com.pavavak.app.call.GroupCallState.Active)?.chatId
+                    ?: (gState.value as? com.pavavak.app.call.GroupCallState.Incoming)?.chatId
+                groupDetails[activeChatId]?.members?.firstOrNull { it.userId == id }?.displayName ?: "Member"
+            }
+            com.pavavak.app.ui.GroupCallOverlay(app.groupCalls, nameFor = nameFor, maskIcon = maskIcon,
+                onRequestPermsThenAccept = { action ->
+                    val isVideo = (app.groupCalls.state.value as? com.pavavak.app.call.GroupCallState.Incoming)?.media ==
+                        com.pavavak.app.call.GroupCallMedia.VIDEO
+                    val needed = if (isVideo)
+                        arrayOf(android.Manifest.permission.RECORD_AUDIO, android.Manifest.permission.CAMERA)
+                    else arrayOf(android.Manifest.permission.RECORD_AUDIO)
+                    if (needed.all { androidx.core.content.ContextCompat.checkSelfPermission(app, it) == android.content.pm.PackageManager.PERMISSION_GRANTED }) action()
+                    else { gAfterPerms = action; gPermLauncher.launch(needed) }
+                })
+
+            // A tapped group-call notification: if that call is still ongoing, raise the in-app ring.
+            val pendingGCall by app.pendingGroupCall.collectAsStateWithLifecycle()
+            LaunchedEffect(pendingGCall, locked) {
+                val p = pendingGCall ?: return@LaunchedEffect
+                if (locked) return@LaunchedEffect
+                app.pendingGroupCall.value = null
+                if (app.groupCalls.state.value !is com.pavavak.app.call.GroupCallState.Idle) return@LaunchedEffect
+                val stillLive = runCatching { app.repository.api.activeGroupCall(p.chatId) }.getOrNull()
+                if (stillLive != null && stillLive.callId == p.callId) {
+                    app.groupCalls.onIncoming(p.callId, p.chatId, p.name,
+                        if (p.video) com.pavavak.app.call.GroupCallMedia.VIDEO else com.pavavak.app.call.GroupCallMedia.AUDIO)
+                }
+            }
         }
     }
 }
@@ -403,6 +455,11 @@ private fun AppNavHost(nav: NavHostController, repository: ChatRepository, setti
         composable(Routes.NEW_CHAT) {
             NewChatScreen(repository, onBack = back, onChatStarted = { id ->
                 nav.navigate(Routes.chat(id)) { popUpTo(Routes.CHATS) }
+            }, onNewGroup = { nav.navigate(Routes.NEW_GROUP) })
+        }
+        composable(Routes.NEW_GROUP) {
+            NewGroupScreen(repository, onBack = back, onGroupCreated = { id ->
+                nav.navigate(Routes.chat(id)) { popUpTo(Routes.CHATS) }
             })
         }
         composable(Routes.CHAT, idArg) { entry ->
@@ -419,12 +476,17 @@ private fun AppNavHost(nav: NavHostController, repository: ChatRepository, setti
         }
         composable(Routes.INFO, idArg) { entry ->
             val chatId = entry.arguments?.getString("chatId").orEmpty()
-            ContactInfoScreen(
-                repository, chatId, onBack = back,
-                onGallery = { nav.navigate(Routes.gallery(chatId, false, repository.chat(chatId)?.displayTitle ?: "Media")) },
-                onSearch = back, // the chat screen has in-chat search; going back is quickest
-                onChatGone = { nav.popBackStack(Routes.CHATS, inclusive = false) },
-            )
+            if (repository.chat(chatId)?.isGroup == true) {
+                GroupInfoScreen(repository, chatId, onBack = back,
+                    onChatGone = { nav.popBackStack(Routes.CHATS, inclusive = false) })
+            } else {
+                ContactInfoScreen(
+                    repository, chatId, onBack = back,
+                    onGallery = { nav.navigate(Routes.gallery(chatId, false, repository.chat(chatId)?.displayTitle ?: "Media")) },
+                    onSearch = back, // the chat screen has in-chat search; going back is quickest
+                    onChatGone = { nav.popBackStack(Routes.CHATS, inclusive = false) },
+                )
+            }
         }
         composable(
             Routes.GALLERY,

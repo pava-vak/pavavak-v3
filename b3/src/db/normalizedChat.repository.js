@@ -493,6 +493,337 @@ async function createDirectConversation(user, otherUserId) {
   };
 }
 
+// ── Groups ──────────────────────────────────────────────────────────────────
+//
+// Groups reuse the whole 1:1 machinery (members, messages, N-way receipts, summaries).
+// The only group-specific pieces are: creating a conversation with type='group' and many
+// members, membership/role management, and the "X added Y / Z left" system messages.
+
+/** A short centered status line in a group ("Asha added Ravi"). Stored as a message so it
+ *  lands in everyone's timeline and chat-list preview, keyed off the body marker __SYS__:. */
+async function insertSystemMessage(client, chatId, actorId, text, memberIds) {
+  const messageId = `m-${crypto.randomUUID()}`;
+  const sentAt = new Date().toISOString();
+  const body = `__SYS__:${text}`;
+  await client.query(
+    `insert into v3_messages (message_id, conversation_id, sender_id, body, created_at)
+     values ($1, $2, $3, $4, $5::timestamptz)`,
+    [messageId, chatId, actorId, body, sentAt]
+  );
+  for (const memberId of memberIds) {
+    await client.query(
+      `insert into v3_message_receipts (message_id, user_id, delivered_at, read_at)
+       values ($1, $2, now(), case when $2 = $3 then now() else null end)
+       on conflict (message_id, user_id) do nothing`,
+      [messageId, memberId, actorId]
+    );
+    await client.query(
+      `insert into v3_user_chat_summaries (
+         user_id, conversation_id, unread_count, last_message_id, last_message_preview,
+         last_message_at, last_message_direction, last_message_status, updated_at
+       ) values ($1, $2, 0, $3, $4, $5::timestamptz, 'incoming', 'read', now())
+       on conflict (user_id, conversation_id) do update
+       set last_message_id = excluded.last_message_id,
+           last_message_preview = excluded.last_message_preview,
+           last_message_at = excluded.last_message_at,
+           last_message_direction = excluded.last_message_direction,
+           updated_at = now()`,
+      [memberId, chatId, messageId, text, sentAt]
+    );
+  }
+  return { messageId, conversationId: chatId, sentAt, body };
+}
+
+/** Build the message object the socket layer emits for a system line (same shape as a normal one). */
+function systemMessageObject(sys) {
+  return {
+    messageId: sys.messageId,
+    direction: 'incoming',
+    senderDisplayName: null,
+    text: sys.body, // keeps the __SYS__: marker so the client renders it centered
+    sentAt: sys.sentAt,
+    status: 'read',
+    system: true
+  };
+}
+
+async function requireAdmin(db, chatId, userId) {
+  const res = await db.query(
+    `select role from v3_conversation_members where conversation_id = $1 and user_id = $2`,
+    [chatId, userId]
+  );
+  if (res.rowCount === 0) throw Object.assign(new Error('Not a member'), { status: 403 });
+  if (res.rows[0].role !== 'admin') throw Object.assign(new Error('Admins only'), { status: 403 });
+}
+
+async function createGroupConversation(user, { title, memberIds = [], avatarEmoji = null }) {
+  await ensureUser(user);
+  const cleanTitle = String(title || '').trim();
+  if (!cleanTitle) throw Object.assign(new Error('Group name is required'), { status: 400 });
+
+  // Resolve + validate the other members; always include the creator.
+  const unique = [...new Set(memberIds.map(Number).filter((id) => id && id !== Number(user.userId)))];
+  const resolved = [];
+  for (const id of unique) {
+    const u = await identity.getById(id);
+    if (u) resolved.push(u);
+  }
+  if (resolved.length === 0) throw Object.assign(new Error('Add at least one member'), { status: 400 });
+
+  const db = getPool();
+  const chatId = `group::${crypto.randomUUID()}`;
+  let sys = null;
+  let createdMemberIds = [];
+  const client = await db.connect();
+  try {
+    await client.query('begin');
+    await client.query(
+      `insert into v3_conversations (conversation_id, type, title, created_by, avatar_emoji)
+       values ($1, 'group', $2, $3, $4)`,
+      [chatId, cleanTitle, user.userId, avatarEmoji]
+    );
+    // Creator is the first admin; everyone else joins as a member.
+    const allMembers = [{ userId: user.userId, role: 'admin' }, ...resolved.map((u) => ({ userId: u.userId, role: 'member' }))];
+    for (const m of allMembers) {
+      await client.query(
+        `insert into v3_conversation_members (conversation_id, user_id, role, muted)
+         values ($1, $2, $3, false)
+         on conflict (conversation_id, user_id) do nothing`,
+        [chatId, m.userId, m.role]
+      );
+      await client.query(
+        `insert into v3_user_chat_summaries (user_id, conversation_id, unread_count, updated_at)
+         values ($1, $2, 0, now())
+         on conflict (user_id, conversation_id) do nothing`,
+        [m.userId, chatId]
+      );
+    }
+    sys = await insertSystemMessage(client, chatId, user.userId, `${user.displayName} created the group "${cleanTitle}"`, allMembers.map((m) => m.userId));
+    createdMemberIds = allMembers.map((m) => m.userId);
+    await client.query('commit');
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return {
+    chat: {
+      chatId,
+      chatType: 'group',
+      title: cleanTitle,
+      subtitle: `${resolved.length + 1} members`,
+      avatarText: avatarEmoji || cleanTitle.slice(0, 1).toUpperCase(),
+      unreadCount: 0,
+      muted: false,
+      lastMessage: null
+    },
+    memberIds: createdMemberIds,
+    system: systemMessageObject(sys)
+  };
+}
+
+/** Full group detail for the header: title, avatar, every member with role + display name. */
+async function getConversationDetail(user, chatId) {
+  const db = getPool();
+  const conv = await db.query(
+    `select c.conversation_id, c.type, c.title, c.avatar_emoji, c.created_by
+     from v3_conversations c
+     join v3_conversation_members m on m.conversation_id = c.conversation_id and m.user_id = $2
+     where c.conversation_id = $1`,
+    [chatId, user.userId]
+  );
+  if (conv.rowCount === 0) throw Object.assign(new Error('Chat not found'), { status: 404 });
+  const row = conv.rows[0];
+  const members = await db.query(
+    `select m.user_id, m.role, coalesce(u.display_name, u.username, m.user_id::text) as display_name, u.username
+     from v3_conversation_members m
+     left join v3_users u on u.user_id = m.user_id
+     where m.conversation_id = $1
+     order by (m.role = 'admin') desc, display_name asc`,
+    [chatId]
+  );
+  return {
+    chatId: row.conversation_id,
+    chatType: row.type,
+    title: row.title,
+    avatarEmoji: row.avatar_emoji || null,
+    createdBy: row.created_by != null ? Number(row.created_by) : null,
+    myRole: members.rows.find((m) => Number(m.user_id) === Number(user.userId))?.role || 'member',
+    members: members.rows.map((m) => ({
+      userId: Number(m.user_id),
+      role: m.role,
+      displayName: m.display_name,
+      username: m.username || null
+    }))
+  };
+}
+
+async function addGroupMembers(user, chatId, memberIds) {
+  const db = getPool();
+  await requireAdmin(db, chatId, user.userId);
+  const existing = new Set((await getConversationMemberUserIds(chatId)).map(Number));
+  const toAdd = [];
+  for (const id of [...new Set(memberIds.map(Number))]) {
+    if (!id || existing.has(id)) continue;
+    const u = await identity.getById(id);
+    if (u) toAdd.push(u);
+  }
+  if (toAdd.length === 0) throw Object.assign(new Error('No new members to add'), { status: 400 });
+
+  let sys = null;
+  const client = await db.connect();
+  try {
+    await client.query('begin');
+    for (const u of toAdd) {
+      await client.query(
+        `insert into v3_conversation_members (conversation_id, user_id, role, muted)
+         values ($1, $2, 'member', false) on conflict (conversation_id, user_id) do nothing`,
+        [chatId, u.userId]
+      );
+      await client.query(
+        `insert into v3_user_chat_summaries (user_id, conversation_id, unread_count, updated_at)
+         values ($1, $2, 0, now()) on conflict (user_id, conversation_id) do nothing`,
+        [u.userId, chatId]
+      );
+    }
+    const allMembers = await client.query('select user_id from v3_conversation_members where conversation_id = $1', [chatId]);
+    const names = toAdd.map((u) => u.displayName).join(', ');
+    sys = await insertSystemMessage(client, chatId, user.userId, `${user.displayName} added ${names}`, allMembers.rows.map((r) => Number(r.user_id)));
+    await client.query('commit');
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+  return { added: toAdd.map((u) => Number(u.userId)), memberIds: await getConversationMemberUserIds(chatId), system: systemMessageObject(sys) };
+}
+
+async function removeGroupMember(user, chatId, targetUserId) {
+  const db = getPool();
+  await requireAdmin(db, chatId, user.userId);
+  const target = Number(targetUserId);
+  if (target === Number(user.userId)) throw Object.assign(new Error('Use leave to remove yourself'), { status: 400 });
+  const targetUser = await identity.getById(target);
+  const beforeMembers = await getConversationMemberUserIds(chatId);
+  if (!beforeMembers.map(Number).includes(target)) throw Object.assign(new Error('Not a member'), { status: 404 });
+
+  let sys = null;
+  const client = await db.connect();
+  try {
+    await client.query('begin');
+    await client.query('delete from v3_conversation_members where conversation_id = $1 and user_id = $2', [chatId, target]);
+    await client.query('delete from v3_user_chat_summaries where conversation_id = $1 and user_id = $2', [chatId, target]);
+    const allMembers = await client.query('select user_id from v3_conversation_members where conversation_id = $1', [chatId]);
+    sys = await insertSystemMessage(client, chatId, user.userId, `${user.displayName} removed ${targetUser?.displayName || 'a member'}`, allMembers.rows.map((r) => Number(r.user_id)));
+    await client.query('commit');
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+  return { removed: target, memberIds: await getConversationMemberUserIds(chatId), system: systemMessageObject(sys) };
+}
+
+async function leaveGroup(user, chatId) {
+  const db = getPool();
+  const memberIds = (await getConversationMemberUserIds(chatId)).map(Number);
+  if (!memberIds.includes(Number(user.userId))) throw Object.assign(new Error('Not a member'), { status: 404 });
+
+  let sys = null;
+  let remainingIds = [];
+  const client = await db.connect();
+  try {
+    await client.query('begin');
+    // If the last admin leaves, promote the oldest remaining member so the group isn't left headless.
+    const roles = await client.query(
+      `select user_id, role from v3_conversation_members where conversation_id = $1`, [chatId]
+    );
+    const remaining = roles.rows.filter((r) => Number(r.user_id) !== Number(user.userId));
+    const leaverIsAdmin = roles.rows.find((r) => Number(r.user_id) === Number(user.userId))?.role === 'admin';
+    const anotherAdmin = remaining.some((r) => r.role === 'admin');
+    if (leaverIsAdmin && !anotherAdmin && remaining.length > 0) {
+      await client.query(
+        `update v3_conversation_members set role = 'admin'
+         where conversation_id = $1 and user_id = (
+           select user_id from v3_conversation_members where conversation_id = $1 and user_id <> $2
+           order by joined_at asc limit 1)`,
+        [chatId, user.userId]
+      );
+    }
+    await client.query('delete from v3_conversation_members where conversation_id = $1 and user_id = $2', [chatId, user.userId]);
+    await client.query('delete from v3_user_chat_summaries where conversation_id = $1 and user_id = $2', [chatId, user.userId]);
+    remainingIds = remaining.map((r) => Number(r.user_id));
+    if (remaining.length > 0) {
+      sys = await insertSystemMessage(client, chatId, user.userId, `${user.displayName} left`, remainingIds);
+    }
+    await client.query('commit');
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+  return { left: Number(user.userId), memberIds: remainingIds, system: sys ? systemMessageObject(sys) : null };
+}
+
+async function renameGroup(user, chatId, title) {
+  const db = getPool();
+  await requireAdmin(db, chatId, user.userId);
+  const cleanTitle = String(title || '').trim();
+  if (!cleanTitle) throw Object.assign(new Error('Group name is required'), { status: 400 });
+  let sys = null;
+  let memberIds = [];
+  const client = await db.connect();
+  try {
+    await client.query('begin');
+    await client.query(`update v3_conversations set title = $2 where conversation_id = $1`, [chatId, cleanTitle]);
+    const allMembers = await client.query('select user_id from v3_conversation_members where conversation_id = $1', [chatId]);
+    memberIds = allMembers.rows.map((r) => Number(r.user_id));
+    sys = await insertSystemMessage(client, chatId, user.userId, `${user.displayName} changed the group name to "${cleanTitle}"`, memberIds);
+    await client.query('commit');
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+  return { chatId, title: cleanTitle, memberIds, system: systemMessageObject(sys) };
+}
+
+async function setMemberRole(user, chatId, targetUserId, role) {
+  const db = getPool();
+  await requireAdmin(db, chatId, user.userId);
+  const newRole = role === 'admin' ? 'admin' : 'member';
+  const target = Number(targetUserId);
+  const targetUser = await identity.getById(target);
+  let sys = null;
+  let memberIds = [];
+  const client = await db.connect();
+  try {
+    await client.query('begin');
+    const res = await client.query(
+      `update v3_conversation_members set role = $3 where conversation_id = $1 and user_id = $2 returning user_id`,
+      [chatId, target, newRole]
+    );
+    if (res.rowCount === 0) { await client.query('rollback'); throw Object.assign(new Error('Not a member'), { status: 404 }); }
+    const allMembers = await client.query('select user_id from v3_conversation_members where conversation_id = $1', [chatId]);
+    memberIds = allMembers.rows.map((r) => Number(r.user_id));
+    const verb = newRole === 'admin' ? 'is now an admin' : 'is no longer an admin';
+    sys = await insertSystemMessage(client, chatId, user.userId, `${targetUser?.displayName || 'A member'} ${verb}`, memberIds);
+    await client.query('commit');
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+  return { userId: target, role: newRole, memberIds, system: systemMessageObject(sys) };
+}
+
 async function markDelivered(user, chatId, messageId) {
   await ensureSeededForUser(user);
   const db = getPool();
@@ -958,6 +1289,13 @@ module.exports = {
   userHasAccess,
   getConversationMemberUserIds,
   createDirectConversation,
+  createGroupConversation,
+  getConversationDetail,
+  addGroupMembers,
+  removeGroupMember,
+  leaveGroup,
+  renameGroup,
+  setMemberRole,
   listAllChats,
   adminListMessagesForChat,
   clearChatMessages,

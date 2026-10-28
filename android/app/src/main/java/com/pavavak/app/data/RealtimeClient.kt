@@ -122,6 +122,9 @@ class RealtimeClient(
             "presence:online", "presence:offline", "message:reaction", "chat:pinned", "poll:voted", "message:expiry",
             "call:incoming", "call:answer", "call:ice", "call:rejected", "call:ended",
             "call:ringing", "call:offline",
+            "group:updated",
+            "gcall:incoming", "gcall:started", "gcall:peers", "gcall:peer-joined",
+            "gcall:peer-left", "gcall:signal", "gcall:ended", "gcall:peer-declined",
         )
     }
 }

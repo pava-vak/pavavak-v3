@@ -174,6 +174,39 @@ class ApiClient(private val store: SecureStore) {
 
     suspend fun presence(userId: Long): Presence = decode(execute("GET", "/api/v3/users/$userId/presence"))
 
+    // ── Groups ────────────────────────────────────────────────────────────────
+
+    suspend fun createGroup(title: String, memberIds: List<Long>, avatarEmoji: String? = null): ChatSummary {
+        val body = buildJsonObject {
+            put("title", title)
+            put("memberIds", JsonArray(memberIds.map { JsonPrimitive(it) }))
+            if (avatarEmoji != null) put("avatarEmoji", avatarEmoji)
+        }
+        return decode<DirectChatResponse>(execute("POST", "/api/v3/groups", body.toString())).chat
+    }
+
+    suspend fun groupDetail(chatId: String): GroupDetail =
+        decode<GroupDetailResponse>(execute("GET", "/api/v3/chats/${enc(chatId)}/detail")).detail
+
+    suspend fun addGroupMembers(chatId: String, memberIds: List<Long>) {
+        val body = buildJsonObject { put("memberIds", JsonArray(memberIds.map { JsonPrimitive(it) })) }
+        execute("POST", "/api/v3/chats/${enc(chatId)}/members", body.toString())
+    }
+
+    suspend fun removeGroupMember(chatId: String, userId: Long) =
+        execute("DELETE", "/api/v3/chats/${enc(chatId)}/members/$userId")
+
+    suspend fun leaveGroup(chatId: String) = execute("POST", "/api/v3/chats/${enc(chatId)}/leave", "{}")
+
+    suspend fun renameGroup(chatId: String, title: String) =
+        execute("PATCH", "/api/v3/chats/${enc(chatId)}", obj("title" to title).toString())
+
+    suspend fun setGroupRole(chatId: String, userId: Long, role: String) =
+        execute("PATCH", "/api/v3/chats/${enc(chatId)}/members/$userId", obj("role" to role).toString())
+
+    suspend fun activeGroupCall(chatId: String): ActiveCall? =
+        decode<ActiveCallResponse>(execute("GET", "/api/v3/chats/${enc(chatId)}/call")).call
+
     // ── Chats ───────────────────────────────────────────────────────────────
 
     suspend fun chats(): List<ChatSummary> = decode<ChatListResponse>(execute("GET", "/api/v3/chats")).items

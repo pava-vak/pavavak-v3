@@ -112,10 +112,13 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    val groupDetails by repository.groupDetails.collectAsStateWithLifecycle()
     val thread = threads[chatId] ?: ThreadState(loading = true)
     val chat = chatList.chats.firstOrNull { it.chatId == chatId }
     val title = chat?.displayTitle ?: "Chat"
     val peer = chat?.peerUserId
+    val isGroup = chat?.isGroup == true
+    val groupDetail = groupDetails[chatId]
     val chatReactions = reactions[chatId].orEmpty()
     val pinned = pinnedMap[chatId]
 
@@ -140,8 +143,12 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
     ) { grants -> if (grants.values.all { it }) afterPerms?.invoke(); afterPerms = null }
     fun startCall(media: com.pavavak.app.call.CallMedia) {
-        val p = peer ?: return
-        val action = { callApp.calls.startCall(p, title, media) }
+        val action: () -> Unit = when {
+            isGroup -> ({ callApp.groupCalls.startCall(chatId, title,
+                if (media == com.pavavak.app.call.CallMedia.VIDEO) com.pavavak.app.call.GroupCallMedia.VIDEO else com.pavavak.app.call.GroupCallMedia.AUDIO) })
+            peer != null -> ({ callApp.calls.startCall(peer, title, media) })
+            else -> return
+        }
         val needed = if (media == com.pavavak.app.call.CallMedia.VIDEO)
             arrayOf(android.Manifest.permission.RECORD_AUDIO, android.Manifest.permission.CAMERA)
         else arrayOf(android.Manifest.permission.RECORD_AUDIO)
@@ -210,7 +217,8 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
             .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars)),
     ) {
         val status = when {
-            typing[chatId] != null -> "typing…"
+            typing[chatId] != null -> if (isGroup) "${typing[chatId]} is typing…" else "typing…"
+            isGroup -> groupDetail?.let { "${it.memberCount} members" } ?: "Group"
             peer != null && peer in online -> "online"
             peer != null -> formatLastSeen(lastSeen[peer])
             else -> ""
@@ -219,10 +227,11 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
             SearchBar(searchQuery, onChange = { searchQuery = it }, count = if (searchQuery.length >= 2) visibleMessages.size else null,
                 onClose = { searchOpen = false; searchQuery = "" })
         } else {
+            val canCall = peer != null || isGroup
             ChatHeader(title, status, online = peer != null && peer in online, onBack = onBack, onInfo = onOpenInfo,
                 onSearch = { searchOpen = true }, onGallery = onOpenGallery, menuOpen = menuOpen, onMenu = { menuOpen = it },
-                onCall = if (peer != null) ({ startCall(com.pavavak.app.call.CallMedia.AUDIO) }) else null,
-                onVideoCall = if (peer != null) ({ startCall(com.pavavak.app.call.CallMedia.VIDEO) }) else null)
+                onCall = if (canCall) ({ startCall(com.pavavak.app.call.CallMedia.AUDIO) }) else null,
+                onVideoCall = if (canCall) ({ startCall(com.pavavak.app.call.CallMedia.VIDEO) }) else null)
         }
         if (pinned != null && !searchOpen) PinnedBanner(
             pinned.text,
@@ -255,7 +264,7 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
                     items(items, key = { it.key }, contentType = { it::class }) { item ->
                         when (item) {
                             is ThreadItem.Bubble -> MessageBubble(item.message, repository, chatReactions[item.message.messageId].orEmpty(),
-                                callbacks, highlight = searchQuery.takeIf { searchOpen && it.length >= 2 })
+                                callbacks, highlight = searchQuery.takeIf { searchOpen && it.length >= 2 }, showSenderName = isGroup)
                             is ThreadItem.Day -> DayHeader(item.date)
                         }
                     }

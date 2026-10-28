@@ -76,7 +76,49 @@ data class ChatSummary(
     val peerUserId: Long? get() = peerId?.longOrNull ?: peerId?.content?.toLongOrNull()
     val displayTitle: String get() = title?.takeIf { it.isNotBlank() } ?: "Chat"
     val isDirect: Boolean get() = chatType == "direct"
+    val isGroup: Boolean get() = chatType == "group"
 }
+
+// ── Groups ────────────────────────────────────────────────────────────────
+
+@Serializable
+data class GroupMember(
+    val userId: Long,
+    val role: String = "member",
+    val displayName: String = "",
+    val username: String? = null,
+) {
+    val isAdmin: Boolean get() = role == "admin"
+}
+
+@Serializable
+data class GroupDetail(
+    val chatId: String,
+    val chatType: String = "group",
+    val title: String? = null,
+    val avatarEmoji: String? = null,
+    val createdBy: Long? = null,
+    val myRole: String = "member",
+    val members: List<GroupMember> = emptyList(),
+) {
+    val isAdmin: Boolean get() = myRole == "admin"
+    val isGroup: Boolean get() = chatType == "group"
+    val memberCount: Int get() = members.size
+}
+
+@Serializable
+data class GroupDetailResponse(val detail: GroupDetail)
+
+/** An ongoing group call in a chat (so a late member can join). */
+@Serializable
+data class ActiveCall(
+    val callId: String,
+    val media: String = "audio",
+    val participants: List<Long> = emptyList(),
+)
+
+@Serializable
+data class ActiveCallResponse(val call: ActiveCall? = null)
 
 @Serializable
 data class ChatListResponse(val items: List<ChatSummary> = emptyList())
@@ -300,6 +342,8 @@ sealed interface MessageContent {
     data class Document(val fileId: String, val fileName: String) : MessageContent
     data object Poll : MessageContent
     data object SystemUpdate : MessageContent
+    /** Group status line ("Asha added Ravi"), stored as "__SYS__:<text>", rendered centered. */
+    data class System(val text: String) : MessageContent
     /** Local-only placeholder while a photo/video/file/voice note uploads. */
     data class Uploading(val label: String) : MessageContent
 
@@ -314,6 +358,7 @@ sealed interface MessageContent {
             }
             body.startsWith("__POLL__:") -> Poll
             body == "__SYS_UPDATE__" -> SystemUpdate
+            body.startsWith("__SYS__:") -> System(body.removePrefix("__SYS__:"))
             // Replies are sent as "> quoted line\nreply text"
             body.startsWith("> ") && body.contains('\n') ->
                 Text(body.substringAfter('\n'), body.substringBefore('\n').removePrefix("> "))
@@ -331,6 +376,7 @@ fun previewText(body: String?, viewOnce: Boolean = false): String {
         is MessageContent.Document -> "📄 ${c.fileName}"
         MessageContent.Poll -> "📊 Poll"
         MessageContent.SystemUpdate -> "🔄 App update"
+        is MessageContent.System -> c.text
         is MessageContent.Uploading -> c.label
         is MessageContent.Text -> c.text.replace('\n', ' ').trim()
     }

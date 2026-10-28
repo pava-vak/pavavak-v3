@@ -68,6 +68,7 @@ import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
@@ -111,9 +112,23 @@ fun MessageBubble(
     callbacks: BubbleCallbacks,
     monitor: Boolean = false,
     highlight: String? = null,
+    showSenderName: Boolean = false,
 ) {
     val outgoing = message.isOutgoing && !monitor
     val content = message.content
+    // Group status lines ("Asha added Ravi") render as a small centered pill, not a chat bubble.
+    if (content is MessageContent.System) {
+        Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+            Surface(color = PavaColors.SurfaceHigh, shape = RoundedCornerShape(12.dp)) {
+                Text(
+                    content.text, fontSize = 12.sp, color = PavaColors.TextMuted,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+        }
+        return
+    }
     val jumbo = (content as? MessageContent.Text)?.takeIf { it.quote == null && !message.deleted }?.let { emojiOnlyCount(it.text) } ?: 0
     val haptics = LocalHapticFeedback.current
     var dragX by remember { mutableFloatStateOf(0f) }
@@ -166,7 +181,8 @@ fun MessageBubble(
                     ),
                 ) {
                     Column(Modifier.padding(start = 10.dp, end = 10.dp, top = 7.dp, bottom = 5.dp)) {
-                        if (monitor) Text(message.senderDisplayName ?: "?", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = PavaColors.Accent)
+                        if (monitor || (showSenderName && !outgoing))
+                            Text(message.senderDisplayName ?: "?", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = PavaColors.Accent)
                         if (message.forwarded) Text("↪ Forwarded", fontSize = 12.sp, fontStyle = FontStyle.Italic,
                             color = LocalContentColorAlpha(0.7f))
                         BubbleBody(message, content, outgoing, monitor, repository, callbacks, jumbo)
@@ -239,6 +255,7 @@ private fun BubbleBody(
             Text("🔄 Update available", fontWeight = FontWeight.SemiBold)
             Text("A new version is ready to install.", fontSize = 13.sp, color = muted)
         }
+        is MessageContent.System -> Text(content.text, fontSize = 13.sp, color = muted) // handled centered upstream
     }
 }
 

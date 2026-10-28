@@ -69,6 +69,12 @@ object Notifier {
     private const val CHANNEL_MSG = "messages"
     private const val CHANNEL_DISGUISE = "alerts"
     const val EXTRA_CHAT_ID = "open_chat_id"
+    // A tapped group-call notification carries the call so the app can show the in-app ring on open
+    // (group calls have no server-buffered offer like 1:1 does).
+    const val EXTRA_GCALL_ID = "gcall_id"
+    const val EXTRA_GCALL_CHAT = "gcall_chat"
+    const val EXTRA_GCALL_MEDIA = "gcall_media"
+    const val EXTRA_GCALL_NAME = "gcall_name"
 
     // When a disguise icon is on, all alerts collapse into this one id so they look like a single
     // app notice (e.g. one weather update) instead of a stack of identical messages.
@@ -137,8 +143,9 @@ object Notifier {
         )
     }
 
-    /** Full-screen incoming-call alert. Opening the app connects the socket and shows the call screen. */
-    fun showIncomingCall(app: PavaApplication, fromName: String, video: Boolean = false) {
+    /** Full-screen incoming-call alert. Opening the app connects the socket and shows the call screen.
+     *  For a group call, [group] carries (callId, chatId, name) so the tap can raise the in-app ring. */
+    fun showIncomingCall(app: PavaApplication, fromName: String, video: Boolean = false, group: Triple<String, String, String>? = null) {
         if (!canNotify(app)) return
         ensureChannel(app)
         val icon = app.settings.current.appIcon
@@ -146,6 +153,14 @@ object Notifier {
         val (dTitle, dText) = AppIcons.callNotice(icon, video)
         val open = Intent(app, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .apply {
+                if (group != null) {
+                    putExtra(EXTRA_GCALL_ID, group.first)
+                    putExtra(EXTRA_GCALL_CHAT, group.second)
+                    putExtra(EXTRA_GCALL_NAME, group.third)
+                    putExtra(EXTRA_GCALL_MEDIA, if (video) "video" else "audio")
+                }
+            }
         val pending = PendingIntent.getActivity(app, CALL_ID, open,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(app, CHANNEL_CALL)
@@ -284,8 +299,14 @@ class PavaMessagingService : FirebaseMessagingService() {
             }
             "call" -> {
                 // Ring with a full-screen screen; opening the app connects the socket, which
-                // delivers the buffered offer so the in-app call screen can accept/decline.
-                Notifier.showIncomingCall(app, message.data["fromName"] ?: "Unknown", message.data["media"] == "video")
+                // delivers the buffered offer (1:1) so the in-app call screen can accept/decline.
+                val video = message.data["media"] == "video"
+                val group = if (message.data["group"] == "1") {
+                    val callId = message.data["callId"] ?: return
+                    val chatId = message.data["chatId"] ?: return
+                    Triple(callId, chatId, message.data["fromName"] ?: "Group call")
+                } else null
+                Notifier.showIncomingCall(app, message.data["fromName"] ?: "Unknown", video, group)
                 if (app.repository.currentUser != null) app.repository.onAppForeground()
             }
             "call_cancel" -> {

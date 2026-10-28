@@ -202,6 +202,8 @@ function attachSocketServer(httpServer) {
 
     // Voice/video call signaling (SDP + ICE relay between the two members)
     require('../modules/calls/calls').registerCallSignaling(io, socket, user);
+    // Group (multi-party) call signaling — room-based, mesh media, SFU-ready protocol
+    require('../modules/calls/groupCalls').registerGroupCallSignaling(io, socket, user);
 
     socket.on('disconnect', async () => {
       clearTypingTimersForUser(user.userId);

@@ -138,6 +138,49 @@ async function createDirectConversation(user, otherUserId) {
   return store.createDirectConversation(user, otherUserId);
 }
 
+function groupStoreOrThrow() {
+  const store = getStore();
+  if (!store.createGroupConversation) {
+    throw Object.assign(new Error('Groups are not supported by this storage mode'), { status: 501 });
+  }
+  return store;
+}
+
+async function createGroupConversation(user, opts) {
+  assertStorageConfigured();
+  return groupStoreOrThrow().createGroupConversation(user, opts);
+}
+
+async function getConversationDetail(user, chatId) {
+  assertStorageConfigured();
+  return groupStoreOrThrow().getConversationDetail(user, chatId);
+}
+
+async function addGroupMembers(user, chatId, memberIds) {
+  assertStorageConfigured();
+  return groupStoreOrThrow().addGroupMembers(user, chatId, memberIds);
+}
+
+async function removeGroupMember(user, chatId, targetUserId) {
+  assertStorageConfigured();
+  return groupStoreOrThrow().removeGroupMember(user, chatId, targetUserId);
+}
+
+async function leaveGroup(user, chatId) {
+  assertStorageConfigured();
+  return groupStoreOrThrow().leaveGroup(user, chatId);
+}
+
+async function renameGroup(user, chatId, title) {
+  assertStorageConfigured();
+  return groupStoreOrThrow().renameGroup(user, chatId, title);
+}
+
+async function setMemberRole(user, chatId, targetUserId, role) {
+  assertStorageConfigured();
+  return groupStoreOrThrow().setMemberRole(user, chatId, targetUserId, role);
+}
+
 async function listAllChats() {
   assertStorageConfigured();
   const store = getStore();
@@ -192,6 +235,13 @@ module.exports = {
   userHasAccess,
   getConversationMemberUserIds,
   createDirectConversation,
+  createGroupConversation,
+  getConversationDetail,
+  addGroupMembers,
+  removeGroupMember,
+  leaveGroup,
+  renameGroup,
+  setMemberRole,
   listAllChats,
   adminListMessagesForChat,
   clearChatMessages,

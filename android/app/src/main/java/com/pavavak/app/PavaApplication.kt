@@ -29,6 +29,8 @@ class PavaApplication : Application() {
         private set
     lateinit var calls: com.pavavak.app.call.CallManager
         private set
+    lateinit var groupCalls: com.pavavak.app.call.GroupCallManager
+        private set
 
     /** True while any screen of the app is visible; push notifications are skipped then. */
     @Volatile var isInForeground = false
@@ -36,6 +38,10 @@ class PavaApplication : Application() {
 
     /** Chat to open after a notification tap (consumed by the UI once unlocked). */
     val pendingChat = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+    /** A group call to raise the in-app ring for, from a tapped call notification. */
+    data class PendingGroupCall(val callId: String, val chatId: String, val name: String, val video: Boolean)
+    val pendingGroupCall = kotlinx.coroutines.flow.MutableStateFlow<PendingGroupCall?>(null)
 
     override fun onCreate() {
         super.onCreate()
@@ -50,8 +56,12 @@ class PavaApplication : Application() {
         push = com.pavavak.app.push.PushManager(this, api)
         update = com.pavavak.app.update.UpdateManager(this, api)
         calls = com.pavavak.app.call.CallManager(this, api, realtime, scope)
-        // A live call must keep the app unlocked (auto-lock is suppressed; manual lock still works)
-        lock.isCallActive = { calls.state.value !is com.pavavak.app.call.CallState.Idle }
+        groupCalls = com.pavavak.app.call.GroupCallManager(this, api, realtime, scope)
+        // A live call (1:1 or group) must keep the app unlocked (auto-lock is suppressed; manual lock still works)
+        lock.isCallActive = {
+            calls.state.value !is com.pavavak.app.call.CallState.Idle ||
+                groupCalls.state.value !is com.pavavak.app.call.GroupCallState.Idle
+        }
         repository.beforeLogout = { push.unregister(); com.pavavak.app.push.Notifier.cancelAll(this) }
         lock.onHiddenChanged = { chatId, hidden -> scope.launch { runCatching { api.setChatHidden(chatId, hidden) } } }
         // Register for push on every sign-in (and on launch when already signed in)
