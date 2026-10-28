@@ -116,6 +116,11 @@ function registerAuthRoutes(app) {
     }));
 
     fastify.post('/api/v3/auth/register', async (request, reply) => {
+      // Closed by default: accounts are admin-provisioned. Hide the endpoint entirely (404)
+      // unless public signup is explicitly enabled, so the API can't be used to self-register.
+      if (!env.ALLOW_PUBLIC_REGISTRATION) {
+        return reply.status(404).send({ success: false, error: 'Not Found' });
+      }
       const parsed = registerSchema.safeParse(request.body || {});
       if (!parsed.success) {
         return reply.status(400).send({

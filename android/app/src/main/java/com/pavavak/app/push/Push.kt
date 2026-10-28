@@ -81,6 +81,7 @@ object Notifier {
     private const val DISGUISE_ID = 7_314_000
     private const val UPDATE_ID = 7_314_001
     private const val CALL_ID = 7_314_002
+    private const val UPDATE_READY_ID = 7_314_003
     // v2: channel sound/vibration are locked after first creation, so a new id applies the ringtone config
     private const val CHANNEL_CALL = "calls_v2"
     private val DISGUISE_ICONS = setOf("weather", "clock", "notes", "calculator")
@@ -262,6 +263,37 @@ object Notifier {
             .setContentIntent(pending)
             .build()
         runCatching { NotificationManagerCompat.from(app).notify(UPDATE_ID, notification) }
+    }
+
+    /**
+     * "Update downloaded — tap to install". Used when a background download finishes while the app
+     * isn't foreground (a background activity start would be blocked, but a notification tap isn't).
+     */
+    fun showUpdateReady(context: Context, file: java.io.File) {
+        if (!canNotify(context)) return
+        ensureChannel(context)
+        val app = context.applicationContext as? PavaApplication
+        val settings = app?.settings?.current
+        val disguise = settings?.let { disguiseNotice(it.appIcon) }
+        val title = disguise?.first ?: if (app?.lock?.isConfigured() == true) settings?.lockName ?: "Update ready" else "Update ready"
+        val text = disguise?.second ?: "Downloaded — tap to install"
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+        val install = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val pending = PendingIntent.getActivity(context, UPDATE_READY_ID, install,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val notification = NotificationCompat.Builder(context, if (disguise != null) CHANNEL_DISGUISE else CHANNEL_MSG)
+            .setSmallIcon(AppIcons.notificationIcon(settings?.appIcon ?: "default"))
+            .setContentTitle(title)
+            .setContentText(text)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
+            .setAutoCancel(true)
+            .setContentIntent(pending)
+            .build()
+        runCatching { NotificationManagerCompat.from(context).notify(UPDATE_READY_ID, notification) }
     }
 
     /** Clears the alert for [chatId] — or the shared disguised alert when a disguise icon is on. */

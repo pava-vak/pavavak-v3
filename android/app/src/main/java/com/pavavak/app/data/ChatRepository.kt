@@ -152,7 +152,26 @@ class ChatRepository(
 
     fun onAppForeground() {
         inForeground = true
-        if (_session.value is SessionState.SignedIn) { realtime.connect(); flushOutbox() } // "connect" event reloads chats + open thread
+        if (_session.value is SessionState.SignedIn) {
+            realtime.connect()
+            flushOutbox()
+            // Don't trust the socket to have survived doze/network-switch: pull the truth over HTTP
+            // right away so messages that arrived while away show without a manual refresh.
+            refreshChats()
+            activeChatId?.let { syncLatest(it) }
+        }
+    }
+
+    /**
+     * Merge any messages the server has that we don't, without disturbing scroll or loading state.
+     * The safety net for a silently-dropped socket: the realtime 'message:new' may never arrive, so
+     * the UI calls this periodically while a chat is open and on every return to foreground.
+     */
+    fun syncLatest(chatId: String) = scope.launch {
+        runCatching { api.thread(chatId) }.onSuccess { page ->
+            val known = _threads.value[chatId]?.messages?.mapTo(HashSet()) { it.messageId } ?: HashSet()
+            for (m in page.items) if (m.messageId !in known) onIncomingMessage(chatId, m)
+        }
     }
 
     // ── Session ─────────────────────────────────────────────────────────────

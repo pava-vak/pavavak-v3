@@ -162,12 +162,14 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
         onDispose { repository.closeChat(chatId); AudioPlayer.stop() }
     }
 
-    // Keep the header's online / last-seen honest: re-sync presence over HTTP while the chat is open,
-    // so a dropped or stale realtime event can't leave it stuck (every ~20s, and on return to foreground).
-    if (peer != null) LaunchedEffect(peer) {
+    // Safety net against a silently-dropped socket (mobile doze / network switch): while the chat is
+    // open, pull any missed messages over HTTP every ~10s so they appear without a manual refresh,
+    // and re-sync the peer's presence so online/last-seen can't get stuck.
+    LaunchedEffect(chatId) {
         while (true) {
-            repository.refreshPresence(peer)
-            kotlinx.coroutines.delay(20_000)
+            kotlinx.coroutines.delay(10_000)
+            repository.syncLatest(chatId)
+            if (peer != null) repository.refreshPresence(peer)
         }
     }
 

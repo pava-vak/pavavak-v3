@@ -16,6 +16,12 @@ const envSchema = z
       (v) => v === true || v === 'true' || v === '1',
       z.boolean()
     ).default(false),
+    // Public self-service signup. Off by default: accounts are admin-provisioned, so the open
+    // /auth/register endpoint is closed (404) unless this is explicitly enabled.
+    ALLOW_PUBLIC_REGISTRATION: z.preprocess(
+      (v) => v === true || v === 'true' || v === '1',
+      z.boolean()
+    ).default(false),
     JWT_ACCESS_SECRET: z.string().min(16).optional(),
     JWT_REFRESH_SECRET: z.string().min(16).optional(),
     JWT_ACCESS_TTL: z.string().min(2).default('15m'),

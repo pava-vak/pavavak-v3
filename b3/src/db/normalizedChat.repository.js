@@ -511,11 +511,13 @@ async function insertSystemMessage(client, chatId, actorId, text, memberIds) {
     [messageId, chatId, actorId, body, sentAt]
   );
   for (const memberId of memberIds) {
+    // The actor has already "read" their own status line; everyone else gets it delivered.
+    const readAt = Number(memberId) === Number(actorId) ? new Date().toISOString() : null;
     await client.query(
       `insert into v3_message_receipts (message_id, user_id, delivered_at, read_at)
-       values ($1, $2, now(), case when $2 = $3 then now() else null end)
+       values ($1, $2, now(), $3)
        on conflict (message_id, user_id) do nothing`,
-      [messageId, memberId, actorId]
+      [messageId, memberId, readAt]
     );
     await client.query(
       `insert into v3_user_chat_summaries (

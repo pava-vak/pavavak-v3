@@ -96,10 +96,23 @@ class UpdateManager(private val context: Context, private val api: ApiClient) {
         }
     }
 
+    private fun updatesDir() = File(context.cacheDir, "updates").apply { mkdirs() }
+    private fun apkFile() = File(updatesDir(), "update.apk")
+    private fun partFile() = File(updatesDir(), "update.apk.part")
+
+    /** The fully-downloaded, integrity-checked APK for [release] if we already have it, else null. */
+    private fun verifiedFile(release: AppRelease): File? {
+        val f = apkFile()
+        if (!f.exists() || f.length() == 0L) return null
+        if (!release.sha256.isNullOrBlank()) return if (sha256Of(f).equals(release.sha256, ignoreCase = true)) f else null
+        if (release.sizeBytes > 0) return if (f.length() == release.sizeBytes) f else null
+        return f
+    }
+
     /**
-     * Downloads [release], verifies it, and launches the installer. If the app may not
-     * install packages yet, sends the user to that system setting and returns (they
-     * tap Update again afterwards).
+     * UI entry point. If the app can't install packages yet, sends the user to that setting.
+     * If the APK is already downloaded and verified, installs it immediately (no re-download).
+     * Otherwise hands the download to a foreground service so it keeps going when the app is closed.
      */
     suspend fun downloadAndInstall(release: AppRelease) {
         if (!canInstall()) {
@@ -107,28 +120,39 @@ class UpdateManager(private val context: Context, private val api: ApiClient) {
             requestInstallPermission()
             return
         }
+        verifiedFile(release)?.let { _status.value = Status.Idle; install(it); return }
+        UpdateDownloadService.start(context, release, api.json)
+    }
+
+    /** The actual work, run inside the foreground service so it survives backgrounding. */
+    suspend fun runDownloadAndInstall(release: AppRelease) {
+        verifiedFile(release)?.let { _status.value = Status.Idle; installOrNotify(it); return }
         val file = withContext(Dispatchers.IO) { download(release) } ?: return
         _status.value = Status.Idle
-        install(file)
+        installOrNotify(file)
     }
 
     private fun download(release: AppRelease): File? {
-        val dir = File(context.cacheDir, "updates").apply { mkdirs() }
-        // Keep one file; overwrite any partial download from before.
-        val dest = File(dir, "update.apk")
+        val dest = apkFile()
+        val part = partFile()
         val url = if (release.url.startsWith("http")) release.url
         else BuildConfig.API_BASE_URL.trimEnd('/') + "/" + release.url.trimStart('/')
         try {
-            _status.value = Status.Downloading(-1)
-            val req = Request.Builder().url(url).get().build()
-            api.http.newCall(req).execute().use { resp ->
+            // Resume a partial from a previous (interrupted) run instead of starting over.
+            var have = if (part.exists()) part.length() else 0L
+            _status.value = Status.Downloading(if (release.sizeBytes > 0) ((have * 100) / release.sizeBytes).toInt() else -1)
+            val reqB = Request.Builder().url(url).get()
+            if (have > 0) reqB.header("Range", "bytes=$have-")
+            api.http.newCall(reqB.build()).execute().use { resp ->
+                if (resp.code == 200 && have > 0) { have = 0L; part.delete() } // server ignored Range: start over
                 if (!resp.isSuccessful) { fail("Download failed (${resp.code})"); return null }
                 val bodyStream = resp.body?.byteStream() ?: run { fail("Empty download"); return null }
-                val total = if (release.sizeBytes > 0) release.sizeBytes else resp.body?.contentLength() ?: -1L
-                dest.outputStream().use { out ->
+                val total = if (release.sizeBytes > 0) release.sizeBytes
+                    else (resp.body?.contentLength() ?: -1L).let { if (it > 0) it + have else -1L }
+                java.io.FileOutputStream(part, have > 0).use { out ->
                     val buf = ByteArray(64 * 1024)
                     var read: Int
-                    var done = 0L
+                    var done = have
                     var lastPct = -1
                     while (bodyStream.read(buf).also { read = it } != -1) {
                         out.write(buf, 0, read)
@@ -143,15 +167,22 @@ class UpdateManager(private val context: Context, private val api: ApiClient) {
         } catch (e: Exception) {
             fail(e.message ?: "Download failed"); return null
         }
-        // Verify integrity when the server gave us a hash.
+        // Verify integrity when the server gave us a hash; only then promote .part to the final file.
         if (!release.sha256.isNullOrBlank()) {
             _status.value = Status.Verifying
-            val actual = sha256Of(dest)
-            if (!actual.equals(release.sha256, ignoreCase = true)) {
-                dest.delete(); fail("Downloaded file was corrupted"); return null
+            if (!sha256Of(part).equals(release.sha256, ignoreCase = true)) {
+                part.delete(); fail("Downloaded file was corrupted"); return null
             }
         }
+        dest.delete()
+        if (!part.renameTo(dest)) { part.copyTo(dest, overwrite = true); part.delete() }
         return dest
+    }
+
+    /** Foreground: open the installer now. Background: post a tap-to-install notification. */
+    private fun installOrNotify(file: File) {
+        val fg = (context.applicationContext as? com.pavavak.app.PavaApplication)?.isInForeground ?: false
+        if (fg) install(file) else com.pavavak.app.push.Notifier.showUpdateReady(context, file)
     }
 
     private fun install(file: File) {
