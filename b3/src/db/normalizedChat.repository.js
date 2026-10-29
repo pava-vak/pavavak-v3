@@ -236,6 +236,7 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
     `select * from (
        select
          msg.message_id,
+         msg.sender_id,
          case when msg.sender_id = $1 then 'outgoing' else 'incoming' end as direction,
          case when msg.sender_id = $1
               then ${dnParam}
@@ -300,6 +301,7 @@ async function listMessagesForChat({ user, chatId, cursor = null, limit = 20 }) 
   const items = visibleRows.map((row) => ({
     messageId: row.message_id,
     direction: row.direction,
+    senderId: row.sender_id != null ? Number(row.sender_id) : null,
     senderDisplayName: row.sender_display_name,
     text: row.text,
     sentAt: row.sent_at?.toISOString?.() || row.sent_at,
@@ -346,6 +348,7 @@ async function appendOutgoingMessage(user, chatId, text, messageId = null, { vie
   const message = {
     messageId: resolvedMessageId,
     direction: 'outgoing',
+    senderId: Number(user.userId),
     senderDisplayName: user.displayName,
     text: viewOnce ? '' : text,
     sentAt,

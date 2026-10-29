@@ -270,6 +270,8 @@ object Notifier {
      * isn't foreground (a background activity start would be blocked, but a notification tap isn't).
      */
     fun showUpdateReady(context: Context, file: java.io.File) {
+        // Only the sideload build self-installs updates; on Play this is never reached.
+        if (!com.pavavak.app.BuildConfig.SIDELOAD) return
         if (!canNotify(context)) return
         ensureChannel(context)
         val app = context.applicationContext as? PavaApplication

@@ -22,6 +22,8 @@ const { registerMediaRoutes } = require('../modules/media/media.routes');
 const { registerFeatureRoutes } = require('../modules/features/features.routes');
 const { registerBiometricRoutes } = require('../modules/biometric/biometric.routes');
 const { recoveryPlugin } = require('../modules/recovery/recovery.routes');
+const { registerAccountRoutes } = require('../modules/account/account.routes');
+const { adminPanelPlugin } = require('../modules/adminPanel/adminPanel.routes');
 const biometricRepo = require('../modules/biometric/biometric.repository');
 
 function buildApp() {
@@ -88,7 +90,9 @@ function buildApp() {
     registerMediaRoutes(instance);
     registerFeatureRoutes(instance);
     registerBiometricRoutes(instance);
+    registerAccountRoutes(instance);
     instance.register(recoveryPlugin);
+    instance.register(adminPanelPlugin);
   });
 
   app.setErrorHandler((error, request, reply) => {

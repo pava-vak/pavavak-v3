@@ -34,6 +34,7 @@ function messageForMember(sender, message, memberId, recipientText) {
     ...message,
     ...(recipientText != null ? { text: recipientText } : {}),
     direction: 'incoming',
+    senderId: Number(sender.userId),
     senderDisplayName: sender.displayName,
     status: 'sent'
   };

@@ -22,6 +22,9 @@ const envSchema = z
       (v) => v === true || v === 'true' || v === '1',
       z.boolean()
     ).default(false),
+    // Secret URL for the private "add a member" page (/api/v3/admin-panel/<token>).
+    // Unset => the page is a normal 404. Must be 64 hex chars when set.
+    ADMIN_PANEL_TOKEN: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     JWT_ACCESS_SECRET: z.string().min(16).optional(),
     JWT_REFRESH_SECRET: z.string().min(16).optional(),
     JWT_ACCESS_TTL: z.string().min(2).default('15m'),

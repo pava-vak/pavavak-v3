@@ -77,7 +77,25 @@ object PavaColors {
     val Danger = Color(0xFFEF4444)
     val Unread = Color(0xFF22C55E)
     val Online = Color(0xFF22C55E)
+
+    /** A stable, distinct colour per group member, for the sender name and bubble outline. */
+    @Composable @ReadOnlyComposable
+    fun senderColor(key: Long): Color {
+        val list = if (LocalPalette.current.isLight) SenderColorsLight else SenderColorsDark
+        val idx = (((key % list.size) + list.size) % list.size).toInt()
+        return list[idx]
+    }
 }
+
+// Readable on the incoming bubble in each theme. Order is fixed so a member keeps one colour.
+private val SenderColorsDark = listOf(
+    Color(0xFF53BDEB), Color(0xFF7FD858), Color(0xFFFF8A80), Color(0xFFFFC14E), Color(0xFFB388FF),
+    Color(0xFF4DD0E1), Color(0xFFF48FB1), Color(0xFFA1C65D), Color(0xFFFFAB66), Color(0xFF9FA8DA),
+)
+private val SenderColorsLight = listOf(
+    Color(0xFF0A7EA4), Color(0xFF2E7D32), Color(0xFFC62828), Color(0xFFB26A00), Color(0xFF6A3FB5),
+    Color(0xFF00838F), Color(0xFFC2185B), Color(0xFF558B2F), Color(0xFFD84315), Color(0xFF3949AB),
+)
 
 /** Chat wallpapers, same gradients as the web app's Contact Info picker. */
 val WALLPAPERS: List<Triple<String, String, Pair<Color, Color>>> = listOf(

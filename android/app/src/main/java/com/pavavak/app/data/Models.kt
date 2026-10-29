@@ -142,6 +142,7 @@ data class Poll(
 data class Message(
     val messageId: String,
     val direction: String = "incoming",
+    val senderId: Long? = null,
     val senderDisplayName: String? = null,
     val text: String = "",
     val sentAt: String = "",

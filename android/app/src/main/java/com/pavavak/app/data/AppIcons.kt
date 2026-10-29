@@ -18,13 +18,17 @@ import com.pavavak.app.R
 object AppIcons {
     data class Option(val id: String, val label: String, val alias: String, val iconRes: Int)
 
-    val OPTIONS = listOf(
-        Option("default", "PaVa Vak", ".LauncherDefault", R.mipmap.ic_launcher),
+    private val DEFAULT = Option("default", "PaVa Vak", ".LauncherDefault", R.mipmap.ic_launcher)
+
+    // Decoy launcher disguises are sideload-only — Google Play's Deceptive Behavior policy
+    // forbids an app masquerading as a different app, so the play flavor offers the real icon only.
+    val OPTIONS = if (com.pavavak.app.BuildConfig.SIDELOAD) listOf(
+        DEFAULT,
         Option("calculator", "Calculator", ".LauncherCalculator", R.mipmap.ic_launcher_calculator),
         Option("notes", "Notes", ".LauncherNotes", R.mipmap.ic_launcher_notes),
         Option("clock", "Clock", ".LauncherClock", R.mipmap.ic_launcher_clock),
         Option("weather", "Weather", ".LauncherWeather", R.mipmap.ic_launcher_weather),
-    )
+    ) else listOf(DEFAULT)
 
     fun apply(context: Context, id: String) {
         val pm = context.packageManager

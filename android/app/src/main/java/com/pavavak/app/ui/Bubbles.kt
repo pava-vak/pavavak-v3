@@ -113,6 +113,7 @@ fun MessageBubble(
     monitor: Boolean = false,
     highlight: String? = null,
     showSenderName: Boolean = false,
+    groupMessage: Boolean = false,
 ) {
     val outgoing = message.isOutgoing && !monitor
     val content = message.content
@@ -165,6 +166,15 @@ fun MessageBubble(
                     BubbleFooter(message, outgoing, monitor, onBubble = false)
                 }
             } else {
+                // In groups, colour each member's incoming bubble: a tinted name on the first
+                // message of a run, and a thin outline in the same colour on every one, so
+                // different senders read apart at a glance.
+                val nameShown = monitor || (showSenderName && !outgoing)
+                val outlineShown = groupMessage && !outgoing
+                val senderKey = message.senderId ?: message.senderDisplayName?.hashCode()?.toLong() ?: 0L
+                val senderTint = PavaColors.senderColor(senderKey)
+                val bubbleShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp,
+                    bottomStart = if (outgoing) 16.dp else 4.dp, bottomEnd = if (outgoing) 4.dp else 16.dp)
                 Surface(
                     color = when {
                         message.text == "__SYS_UPDATE__" -> PavaColors.SurfaceHigh
@@ -172,17 +182,21 @@ fun MessageBubble(
                         else -> PavaColors.IncomingBubble
                     },
                     contentColor = if (outgoing) PavaColors.OutgoingText else PavaColors.TextPrimary,
-                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp,
-                        bottomStart = if (outgoing) 16.dp else 4.dp, bottomEnd = if (outgoing) 4.dp else 16.dp),
+                    shape = bubbleShape,
                     shadowElevation = if (PavaColors.IsLight) 1.dp else 0.dp,
                     modifier = bubbleModifier.then(
-                        if (highlight != null && message.text.contains(highlight, ignoreCase = true))
-                            Modifier.border(2.dp, PavaColors.Accent, RoundedCornerShape(16.dp)) else Modifier,
+                        when {
+                            highlight != null && message.text.contains(highlight, ignoreCase = true) ->
+                                Modifier.border(2.dp, PavaColors.Accent, bubbleShape)
+                            outlineShown ->
+                                Modifier.border(1.5.dp, senderTint.copy(alpha = 0.9f), bubbleShape)
+                            else -> Modifier
+                        },
                     ),
                 ) {
                     Column(Modifier.padding(start = 10.dp, end = 10.dp, top = 7.dp, bottom = 5.dp)) {
-                        if (monitor || (showSenderName && !outgoing))
-                            Text(message.senderDisplayName ?: "?", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = PavaColors.Accent)
+                        if (nameShown)
+                            Text(message.senderDisplayName ?: "?", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = senderTint)
                         if (message.forwarded) Text("↪ Forwarded", fontSize = 12.sp, fontStyle = FontStyle.Italic,
                             color = LocalContentColorAlpha(0.7f))
                         BubbleBody(message, content, outgoing, monitor, repository, callbacks, jumbo)

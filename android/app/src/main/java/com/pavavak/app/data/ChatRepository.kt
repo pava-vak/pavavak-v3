@@ -205,6 +205,19 @@ class ChatRepository(
         }
     }
 
+    /** Permanently delete the account, then tear down the local session (→ SignedOut). */
+    fun deleteAccount(password: String, onResult: (String?) -> Unit) = scope.launch {
+        runCatching { api.deleteAccount(password) }
+            .onSuccess {
+                runCatching { beforeLogout?.invoke() }
+                realtime.disconnect()
+                runCatching { api.logout() } // best-effort local clear (token/cookie); account is already gone
+                onSignedOut()
+                onResult(null)
+            }
+            .onFailure { onResult(it.message ?: "Couldn't delete your account") }
+    }
+
     fun updateDisplayName(name: String, onDone: (String?) -> Unit) = scope.launch {
         runCatching { api.updateDisplayName(name); api.me() }
             .onSuccess { _session.value = SessionState.SignedIn(it); onDone(null) }

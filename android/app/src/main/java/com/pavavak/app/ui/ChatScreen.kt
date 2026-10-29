@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -95,6 +96,13 @@ private fun buildItems(messages: List<Message>): List<ThreadItem> {
         if (day != null && day != olderDay) out += ThreadItem.Day(day)
     }
     return out
+}
+
+/** Two incoming messages are from the same group member (so the second hides its name). */
+private fun sameSender(a: Message, b: Message): Boolean {
+    if (a.isOutgoing || b.isOutgoing) return a.isOutgoing == b.isOutgoing
+    return if (a.senderId != null && b.senderId != null) a.senderId == b.senderId
+    else a.senderDisplayName == b.senderDisplayName
 }
 
 /** Drafts survive switching chats but are never written to disk. */
@@ -263,10 +271,17 @@ fun ChatScreen(repository: ChatRepository, chatId: String, onBack: () -> Unit, o
                     state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                 ) {
-                    items(items, key = { it.key }, contentType = { it::class }) { item ->
+                    itemsIndexed(items, key = { _, it -> it.key }, contentType = { _, it -> it::class }) { index, item ->
                         when (item) {
-                            is ThreadItem.Bubble -> MessageBubble(item.message, repository, chatReactions[item.message.messageId].orEmpty(),
-                                callbacks, highlight = searchQuery.takeIf { searchOpen && it.length >= 2 }, showSenderName = isGroup)
+                            is ThreadItem.Bubble -> {
+                                // The message visually above (older) is items[index + 1]; the name
+                                // shows only when that isn't the same sender — first of a run.
+                                val above = (items.getOrNull(index + 1) as? ThreadItem.Bubble)?.message
+                                val firstOfRun = above == null || !sameSender(above, item.message)
+                                MessageBubble(item.message, repository, chatReactions[item.message.messageId].orEmpty(),
+                                    callbacks, highlight = searchQuery.takeIf { searchOpen && it.length >= 2 },
+                                    showSenderName = isGroup && firstOfRun, groupMessage = isGroup)
+                            }
                             is ThreadItem.Day -> DayHeader(item.date)
                         }
                     }

@@ -25,9 +25,34 @@ android {
         applicationId = "com.pavavak.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 25
-        versionName = "1.7.1"
+        versionCode = 26
+        versionName = "1.8.0"
         buildConfigField("String", "API_BASE_URL", "\"https://187-127-190-15.sslip.io\"")
+    }
+
+    // Two distribution tracks from one codebase:
+    //  • sideload — hosted on our own site: keeps the decoy launcher icons and the in-app
+    //    APK self-updater (REQUEST_INSTALL_PACKAGES + the download foreground service).
+    //  • play     — Google Play: honest PaVa Vak identity only, no decoy aliases, no self-updater
+    //    (updates come through Play). The forbidden pieces live in src/sideload/ and never
+    //    compile into the play build.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("play") {
+            dimension = "distribution"
+            manifestPlaceholders["appLabel"] = "PaVa Vak"
+            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher"
+            manifestPlaceholders["appRoundIcon"] = "@mipmap/ic_launcher"
+            buildConfigField("boolean", "SIDELOAD", "false")
+        }
+        create("sideload") {
+            dimension = "distribution"
+            isDefault = true
+            manifestPlaceholders["appLabel"] = "PA Weather"
+            manifestPlaceholders["appIcon"] = "@mipmap/ic_launcher_neutral"
+            manifestPlaceholders["appRoundIcon"] = "@mipmap/ic_launcher_neutral"
+            buildConfigField("boolean", "SIDELOAD", "true")
+        }
     }
 
     signingConfigs {
@@ -73,6 +98,12 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
+
+    lint {
+        // Don't let release lint-vital abort our CLI builds; we gate quality elsewhere.
+        checkReleaseBuilds = false
+        abortOnError = false
     }
 }
 

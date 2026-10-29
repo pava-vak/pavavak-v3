@@ -121,6 +121,9 @@ class ApiClient(private val store: SecureStore) {
     suspend fun changePassword(current: String, new: String) =
         execute("PUT", "/api/v3/auth/change-password", obj("currentPassword" to current, "newPassword" to new).toString())
 
+    suspend fun deleteAccount(password: String) =
+        execute("DELETE", "/api/v3/account", obj("password" to password).toString())
+
     suspend fun sessions(): List<SessionInfo> = decode<SessionsResponse>(execute("GET", "/api/v3/auth/sessions")).sessions
     suspend fun revokeSession(id: String) = execute("DELETE", "/api/v3/auth/sessions/${enc(id)}")
     suspend fun revokeAllSessions() = execute("DELETE", "/api/v3/auth/sessions")

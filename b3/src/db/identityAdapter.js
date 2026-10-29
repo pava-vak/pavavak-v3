@@ -92,6 +92,15 @@ async function cleanSeedData() {
   return store().cleanSeedData();
 }
 
+async function deleteUser(userId) {
+  if (!store().deleteUser) {
+    const err = new Error('Account deletion is not supported in this storage mode');
+    err.status = 501;
+    throw err;
+  }
+  return store().deleteUser(userId);
+}
+
 async function updateDisplayName(userId, displayName) {
   if (!store().updateDisplayName) {
     const err = new Error('Not supported in this storage mode');
@@ -115,6 +124,7 @@ module.exports = {
   ensureUser,
   incrementTokenVersion,
   cleanSeedData,
+  deleteUser,
   updateDisplayName,
   publicUser
 };

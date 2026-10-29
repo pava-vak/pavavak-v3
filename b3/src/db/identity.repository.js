@@ -144,6 +144,94 @@ async function cleanSeedData() {
   await db.query(`delete from v3_users where user_id >= ${MAX_REAL_USER_ID}`);
 }
 
+async function tableExists(client, qualifiedName) {
+  const r = await client.query('select to_regclass($1) as t', [qualifiedName]);
+  return Boolean(r.rows[0] && r.rows[0].t);
+}
+
+// Account deletion (GDPR / Play "delete account"): erase the account, credentials
+// and all personal data, but keep the person's already-sent messages visible in
+// other people's chats/groups attributed to a reserved, disabled "Deleted user"
+// sentinel — so deleting one member never tears holes in everyone else's history.
+// Returns false if the account doesn't exist (or isn't a real account).
+async function deleteUser(userId) {
+  const db = getPool();
+  const client = await db.connect();
+  try {
+    await client.query('begin');
+
+    const target = await client.query(
+      `select user_id, is_admin from v3_users
+       where user_id = $1 and user_id < ${MAX_REAL_USER_ID}
+       for update`,
+      [userId]
+    );
+    if (target.rowCount === 0) {
+      await client.query('rollback');
+      return false;
+    }
+
+    // Never let the last admin delete themselves — it would lock everyone out of admin.
+    if (target.rows[0].is_admin) {
+      const admins = await client.query(
+        `select count(*)::int as c from v3_users
+         where is_admin = true and not disabled and user_id < ${MAX_REAL_USER_ID}`
+      );
+      if (admins.rows[0].c <= 1) {
+        const err = new Error('You are the only admin. Make another member an admin before deleting this account.');
+        err.status = 409;
+        throw err;
+      }
+    }
+
+    // Reserved sentinel; '__deleted__' can never collide with a real username
+    // (the create-user rules forbid underscores). Disabled => hidden from search.
+    let sentinel = await client.query(`select user_id from v3_users where username = '__deleted__' limit 1`);
+    let sentinelId;
+    if (sentinel.rowCount) {
+      sentinelId = sentinel.rows[0].user_id;
+    } else {
+      const ins = await client.query(
+        `insert into v3_users (username, display_name, password_hash, is_admin, disabled)
+         values ('__deleted__', 'Deleted user', null, false, true)
+         returning user_id`
+      );
+      sentinelId = ins.rows[0].user_id;
+    }
+
+    // Reassign authored content whose FK is NOT on delete cascade.
+    await client.query('update v3_messages set sender_id = $2 where sender_id = $1', [userId, sentinelId]);
+    if (await tableExists(client, 'public.v3_message_media')) {
+      await client.query('update v3_message_media set uploaded_by = $2 where uploaded_by = $1', [userId, sentinelId]);
+    }
+    // created_by is nullable with no cascade — just detach it.
+    await client.query('update v3_conversations set created_by = null where created_by = $1', [userId]);
+
+    // Per-user auth/push state (not FK-linked to v3_users).
+    if (await tableExists(client, 'public.v3_fcm_tokens')) {
+      await client.query('delete from v3_fcm_tokens where user_id = $1', [userId]);
+    }
+    if (await tableExists(client, 'public.user_sessions')) {
+      await client.query('delete from user_sessions where user_id = $1', [userId]);
+    }
+
+    // Everything else (memberships, receipts, summaries, reactions, stars,
+    // poll votes, scheduled messages) is ON DELETE CASCADE off this row.
+    const del = await client.query(
+      `delete from v3_users where user_id = $1 and user_id < ${MAX_REAL_USER_ID} returning user_id`,
+      [userId]
+    );
+
+    await client.query('commit');
+    return del.rowCount > 0;
+  } catch (error) {
+    await client.query('rollback').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function adminSummary() {
   const db = getPool();
   const [users, conversations, messages] = await Promise.all([
@@ -182,5 +270,6 @@ module.exports = {
   adminListUsers,
   adminSummary,
   incrementTokenVersion,
-  cleanSeedData
+  cleanSeedData,
+  deleteUser
 };

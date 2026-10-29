@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fingerprint
@@ -94,7 +95,7 @@ import java.io.File
 
 val LOCK_TIMERS = listOf(0 to "Immediately", 30 to "After 30 seconds", 60 to "After 1 minute", 300 to "After 5 minutes", 900 to "After 15 minutes")
 
-private enum class SettingsDialog { Name, Password, Timer, LockName, ResetIcon, SignOut, LockOff, CustomIcon }
+private enum class SettingsDialog { Name, Password, Timer, LockName, ResetIcon, SignOut, LockOff, CustomIcon, DeleteAccount }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -199,6 +200,8 @@ fun SettingsScreen(
             Section("Theme")
             ThemePicker(settings.themeId) { settingsStore.setTheme(it) }
 
+            // Launcher disguises are a sideload-only feature (Play forbids masquerading as another app).
+            if (com.pavavak.app.BuildConfig.SIDELOAD) {
             Section("App icon")
             Text(
                 "Disguise how this app looks on your home screen. Notifications use the same icon.",
@@ -212,6 +215,7 @@ fun SettingsScreen(
             if (AppIcons.canPinShortcut(context)) {
                 Row_(Icons.Filled.Image, "Add a shortcut with your own photo", "Any picture and name you like") { dialog = SettingsDialog.CustomIcon }
             }
+            }
 
             Section("Notifications")
             SwitchRow(Icons.Filled.NotificationsActive, "Message sound", "Play a sound for new messages while the app is open", settings.chime) {
@@ -224,6 +228,11 @@ fun SettingsScreen(
                 Row_(Icons.Filled.Key, "Change password", null) { dialog = SettingsDialog.Password }
             }
             Row_(Icons.AutoMirrored.Filled.Logout, "Sign out", null, destructive = true) { dialog = SettingsDialog.SignOut }
+            if (!decoy) {
+                Row_(Icons.Filled.DeleteForever, "Delete account", "Permanently delete your account and data", destructive = true) {
+                    dialog = SettingsDialog.DeleteAccount
+                }
+            }
 
             Section("About")
             val updateMgr = remember { (context.applicationContext as com.pavavak.app.PavaApplication).update }
@@ -281,6 +290,7 @@ fun SettingsScreen(
         SettingsDialog.SignOut -> ConfirmDialog("Sign out?", "Your chats stay on the server. The app lock on this phone is removed.", "Sign out",
             destructive = true, onConfirm = { repository.logout() }, onDismiss = { dialog = null })
         SettingsDialog.CustomIcon -> CustomShortcutDialog { dialog = null }
+        SettingsDialog.DeleteAccount -> DeleteAccountDialog(repository) { dialog = null }
         SettingsDialog.ResetIcon, null -> Unit
     }
 }
@@ -428,6 +438,38 @@ private fun ChangePasswordDialog(repository: ChatRepository, onDismiss: () -> Un
                     busy = false
                 }
             }) { Text("Change") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun DeleteAccountDialog(repository: ChatRepository, onDismiss: () -> Unit) {
+    var password by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("Delete account") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "This permanently deletes your account, profile, chats and group memberships. " +
+                        "It can't be undone. Messages you already sent stay visible to others as from a \"Deleted user\".",
+                    color = PavaColors.TextMuted, fontSize = 13.sp,
+                )
+                OutlinedTextField(password, { password = it }, label = { Text("Your password") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation())
+                if (error != null) Text(error!!, color = PavaColors.Danger, fontSize = 13.sp)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy && password.isNotEmpty(), onClick = {
+                busy = true; error = null
+                repository.deleteAccount(password) { err ->
+                    if (err == null) onDismiss() else { error = err; busy = false }
+                }
+            }) { Text("Delete forever", color = PavaColors.Danger) }
         },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") } },
     )
