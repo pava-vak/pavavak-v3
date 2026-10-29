@@ -16,7 +16,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import okhttp3.Request
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
 
 /**
  * Checks the server for a newer published build and installs it in place.
@@ -96,6 +98,12 @@ class UpdateManager(private val context: Context, private val api: ApiClient) {
         }
     }
 
+    // A download-only client: a stall is caught in 60s (vs the shared client's long read
+    // timeout) so we can reconnect and resume quickly instead of hanging the whole transfer.
+    private val downloadHttp by lazy {
+        api.http.newBuilder().readTimeout(60, TimeUnit.SECONDS).build()
+    }
+
     private fun updatesDir() = File(context.cacheDir, "updates").apply { mkdirs() }
     private fun apkFile() = File(updatesDir(), "update.apk")
     private fun partFile() = File(updatesDir(), "update.apk.part")
@@ -132,41 +140,34 @@ class UpdateManager(private val context: Context, private val api: ApiClient) {
         installOrNotify(file)
     }
 
+    /**
+     * Downloads [release] to the .part file, auto-retrying through stalls and resuming from
+     * where it left off each time (HTTP Range), so a flaky mobile link finishes on its own
+     * instead of failing and waiting for the user to keep tapping Retry. Then verifies and
+     * promotes it. Only gives up — showing Retry — after several failed attempts in a row.
+     */
     private fun download(release: AppRelease): File? {
         val dest = apkFile()
         val part = partFile()
         val url = if (release.url.startsWith("http")) release.url
         else BuildConfig.API_BASE_URL.trimEnd('/') + "/" + release.url.trimStart('/')
-        try {
-            // Resume a partial from a previous (interrupted) run instead of starting over.
-            var have = if (part.exists()) part.length() else 0L
-            _status.value = Status.Downloading(if (release.sizeBytes > 0) ((have * 100) / release.sizeBytes).toInt() else -1)
-            val reqB = Request.Builder().url(url).get()
-            if (have > 0) reqB.header("Range", "bytes=$have-")
-            api.http.newCall(reqB.build()).execute().use { resp ->
-                if (resp.code == 200 && have > 0) { have = 0L; part.delete() } // server ignored Range: start over
-                if (!resp.isSuccessful) { fail("Download failed (${resp.code})"); return null }
-                val bodyStream = resp.body?.byteStream() ?: run { fail("Empty download"); return null }
-                val total = if (release.sizeBytes > 0) release.sizeBytes
-                    else (resp.body?.contentLength() ?: -1L).let { if (it > 0) it + have else -1L }
-                java.io.FileOutputStream(part, have > 0).use { out ->
-                    val buf = ByteArray(64 * 1024)
-                    var read: Int
-                    var done = have
-                    var lastPct = -1
-                    while (bodyStream.read(buf).also { read = it } != -1) {
-                        out.write(buf, 0, read)
-                        done += read
-                        if (total > 0) {
-                            val pct = ((done * 100) / total).toInt().coerceIn(0, 100)
-                            if (pct != lastPct) { lastPct = pct; _status.value = Status.Downloading(pct) }
-                        }
-                    }
-                }
+
+        val maxAttempts = 8
+        var attempt = 0
+        while (true) {
+            attempt++
+            val complete = runCatching { downloadPass(url, release, part) }
+            if (complete.getOrNull() == true) break
+            if (attempt >= maxAttempts) {
+                fail("Download kept stopping — check your connection and tap Retry.")
+                return null
             }
-        } catch (e: Exception) {
-            fail(e.message ?: "Download failed"); return null
+            // Keep the partial file and the last progress visible; back off, then resume.
+            _status.value = Status.Downloading(pctOf(part.length(), release))
+            val waitMs = (1000L shl (attempt - 1)).coerceAtMost(15_000L) // 1,2,4,8,15,15…s
+            try { Thread.sleep(waitMs) } catch (_: InterruptedException) { return null }
         }
+
         // Verify integrity when the server gave us a hash; only then promote .part to the final file.
         if (!release.sha256.isNullOrBlank()) {
             _status.value = Status.Verifying
@@ -177,6 +178,47 @@ class UpdateManager(private val context: Context, private val api: ApiClient) {
         dest.delete()
         if (!part.renameTo(dest)) { part.copyTo(dest, overwrite = true); part.delete() }
         return dest
+    }
+
+    private fun pctOf(have: Long, release: AppRelease): Int =
+        if (release.sizeBytes > 0) ((have * 100) / release.sizeBytes).toInt().coerceIn(0, 100) else -1
+
+    /**
+     * One connect-and-stream pass, appending to [part] from where it left off. Returns true when
+     * [part] holds the whole file, false if the stream ended short (resume on the next pass);
+     * throws on a network error (also a resume).
+     */
+    private fun downloadPass(url: String, release: AppRelease, part: File): Boolean {
+        var have = if (part.exists()) part.length() else 0L
+        if (release.sizeBytes > 0 && have >= release.sizeBytes) return true
+        _status.value = Status.Downloading(pctOf(have, release))
+        val reqB = Request.Builder().url(url).get()
+        if (have > 0) reqB.header("Range", "bytes=$have-")
+        downloadHttp.newCall(reqB.build()).execute().use { resp ->
+            if (resp.code == 200 && have > 0) { have = 0L; part.delete() } // server ignored Range: start over
+            if (!resp.isSuccessful) throw IOException("HTTP ${resp.code}")
+            val body = resp.body ?: throw IOException("empty response")
+            val total = if (release.sizeBytes > 0) release.sizeBytes
+                else body.contentLength().let { if (it > 0) it + have else -1L }
+            body.byteStream().use { input ->
+                java.io.FileOutputStream(part, have > 0).use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    var read: Int
+                    var done = have
+                    var lastPct = -1
+                    while (input.read(buf).also { read = it } != -1) {
+                        out.write(buf, 0, read)
+                        done += read
+                        if (total > 0) {
+                            val pct = ((done * 100) / total).toInt().coerceIn(0, 100)
+                            if (pct != lastPct) { lastPct = pct; _status.value = Status.Downloading(pct) }
+                        }
+                    }
+                }
+            }
+        }
+        // Complete only when the whole file is on disk (when we know its size).
+        return release.sizeBytes <= 0 || part.length() >= release.sizeBytes
     }
 
     /** Foreground: open the installer now. Background: post a tap-to-install notification. */
